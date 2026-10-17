@@ -3,10 +3,12 @@ module Piko.Ast where
 import Effectful.Internal.Effect (type (++))
 import Effectful.State.Static.Local
 import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Effectful.Reader.Static
 import Data.Text (Text)
 import Data.Traversable
 import Data.Map (Map)
+import Data.Set (Set)
 import Control.Monad
 import Data.Foldable
 import Control.Lens
@@ -17,10 +19,6 @@ import Effectful
 import Data.Kind
 import Data.Void
 import Data.Int
-
-type family (!~) (a :: k) (b :: k) :: Constraint where
-  (!~) a a = TypeError ('Text "ne")
-  (!~) a b = ()
 
 data Span = Span Int Int
   deriving ( Show
@@ -118,6 +116,10 @@ pattern TyNum     = TyCon "num"
 
 pattern TyLst a   = TyApp (TyCon "lst") a
 
+instance Plated Ty where
+  plate f (TyApp x y) = TyApp <$> f x <*> f y
+  plate _ x          = pure x
+
 type instance XExpVar Infer = (Span, Text, (Int, Int))
 
 type instance XLitStr Typed = (XLitStr Infer, Ty)
@@ -132,7 +134,8 @@ type instance XExpTup Typed = (XExpTup Infer, Ty)
 type instance XExpLit Typed = (XExpLit Infer, Ty)
 type instance XExpAbs Typed = (XExpAbs Infer, Ty)
 type instance XExpApp Typed = (XExpApp Infer, Ty)
-type instance XExpLet Typed = (XExpLet Infer, Ty)
+type instance XExpLet Typed = (Span, Ty)
+type instance XExpExt Typed = (XExpExt Infer, Ty)
 
 type instance XPatVar Infer = (Span, Text, Int)
 
@@ -142,7 +145,6 @@ type instance XPatTup Typed = XPatTup Infer
 type instance XPatVar Typed = XPatVar Infer
 type instance XPatLit Typed = XPatLit Infer
 type instance XPatExt Typed = XPatExt Infer
-type instance XExpExt Typed = XExpExt Infer
 
 type instance XLitStr Inter = XLitStr Typed
 type instance XLitDec Inter = XLitDec Typed
@@ -183,9 +185,9 @@ type instance XExpTup Infer = XExpTup Parse
 type instance XExpLit Infer = XExpLit Parse
 type instance XExpApp Infer = XExpApp Parse
 
+type instance XExpExt Infer = (Span, Text)
 type instance XPatVar Parse = (Span, Text)
 type instance XExpVar Parse = (Span, Text)
-type instance XExpExt Infer = (Span, Text)
 
 type instance XLitStr Parse = Span
 type instance XLitDec Parse = Span
@@ -258,140 +260,37 @@ deriving instance Eq (Pat Inter)
 deriving instance Eq (Lit Inter)
 deriving instance Eq (Exp Inter)
 
+infixl 8 :&:
 
-class b !~ c => Convert (a :: X -> Type) b c where
-  type Es a b c :: [Effect]
+data Scheme = Set Text :&: Ty
 
-  convert     :: a b -> Eff (Es a b c) (a c)
+data Kind
+  = KindType
+  | KindVar Text
+  | KindArr Kind Kind
+  deriving ( Show
+           , Ord
+           , Eq
+           )
 
-  convertMany :: [a b] -> Eff (Es a b c) [a c]
-  convertMany = traverse convert
+class TyOf a where
+  tyOf :: a -> Ty
 
-instance ( Convert a Parse Typed
-         , Convert a Typed Inter
-         , Subset (Es a Parse Typed) (Es a Parse Inter)
-         , Subset (Es a Typed Inter) (Es a Parse Inter)
-         ) => Convert a Parse Inter where
-  type Es a Parse Inter = Es a Parse Typed ++ Es a Typed Inter
+instance TyOf (Exp Typed) where
+  tyOf = \case
+    ExpVar (_, t) -> t
+    ExpApp (_, t) _ _     -> t
+    ExpAbs (_, t) _ _  -> t
+    ExpLet (_, t) _ _ _     -> t
+    ExpLit (_, t) _       -> t
+    ExpExt (_, t)    -> t
 
-  convert = (inject . convert @a @Typed @Inter)
-        <=< (inject . convert @a @Parse @Typed)
-
-  convertMany = (inject . convertMany @a @Typed @Inter)
-        <=< (inject . convertMany @a @Parse @Typed)
-
-instance ( Convert a Parse Infer
-         , Convert a Infer Typed
-         , Subset (Es a Parse Infer) (Es a Parse Typed)
-         , Subset (Es a Infer Typed) (Es a Parse Typed)
-         ) => Convert a Parse Typed where
-  type Es a Parse Typed = Es a Parse Infer ++ Es a Infer Typed
-
-  convert = (inject . convert @a @Infer @Typed)
-        <=< (inject . convert @a @Parse @Infer)
-
-  convertMany = (inject . convertMany @a @Infer @Typed)
-        <=< (inject . convertMany @a @Parse @Infer)
-
-instance Convert Lit Infer Typed where
-  type Es Lit Infer Typed = '[]
-
-  convert (LitNum x n) = pure $ LitNum (x, TyNum) n
-  convert (LitDec x d) = pure $ LitDec (x, TyDec) d
-  convert (LitStr x s) = pure $ LitStr (x, TyStr) s
-  convert (LitChr x c) = pure $ LitChr (x, TyChr) c
-  convert (LitBin x b) = pure $ LitBin (x, TyBin) b
-  convert (LitExt x)   = pure $ absurd x
-
-instance Convert Lit Parse Infer where
-  type Es Lit Parse Infer = '[]
-
-  convert (LitNum x n) = pure $ LitNum x n
-  convert (LitDec x d) = pure $ LitDec x d
-  convert (LitStr x s) = pure $ LitStr x s
-  convert (LitChr x c) = pure $ LitChr x c
-  convert (LitBin x b) = pure $ LitBin x b
-  convert (LitExt x)   = pure $ absurd x
-
-instance Convert Lit Typed Inter where
-  type Es Lit Typed Inter = '[]
-
-  convert (LitNum x n) = pure $ LitNum x n
-  convert (LitDec x d) = pure $ LitDec x d
-  convert (LitStr x s) = pure $ LitStr x s
-  convert (LitChr x c) = pure $ LitChr x c
-  convert (LitBin x b) = pure $ LitBin x b
-  convert (LitExt x)   = pure $ absurd x
-
-instance Convert Pat Parse Infer where
-  type Es Pat Parse Infer = '[Reader Int]
-
-  convert (PatVar (a, b)) = PatVar . (a,b,) <$> ask
-
-  convert (PatLit x a)    = PatLit x <$> inject (convert a)
-
-  convert (PatExt x)      = pure $ absurd x
-
-  convert pat
-    | PatLst x a <- pat   = PatLst x <$> conv a
-    | PatTup x a <- pat   = PatTup x <$> conv a
-        where
-          cont t f s = snd <$> mapAccumM f s t
-
-          conv a = ask >>= cont a f
-            where
-              f s = fmap (s+1,) . local (const (s :: Int)) . convert
-
-
-instance Convert Pat Infer Typed where
-  type Es Pat Infer Typed = '[]
-
-  convert (PatLst x a) = PatLst x <$> traverse convert a
-  convert (PatTup x a) = PatTup x <$> traverse convert a
-  convert (PatLit x a) = PatLit x <$> convert a
-
-  convert (PatVar x)   = pure $ PatVar x
-  convert (PatExt x)   = pure $ absurd x
-
-instance Convert Pat Typed Inter where
-  type Es Pat Typed Inter = '[]
-
-  convert (PatLst x a) = PatLst x <$> traverse convert a
-  convert (PatTup x a) = PatTup x <$> traverse convert a
-  convert (PatLit x a) = PatLit x <$> convert a
-
-  convert (PatVar x)   = pure $ PatVar x
-  convert (PatExt x)   = pure $ absurd x
-
-instance Convert Exp Parse Infer where
-  type Es Exp Parse Infer = '[Reader [(Text, Int)]]
-
-  convert (ExpLst s x)     = ExpLst s <$> traverse convert x
-
-  convert (ExpTup s x)     = ExpTup s <$> traverse convert x
-
-  convert (ExpLet s p x y) = do
-    p' <- inject $ convert p & runReader 0
-    x' <- convert x
-    y' <- local (offset p' ++) (convert y)
-    pure $ ExpLet s p' x' y'
-
-  convert (ExpApp s f x)   = ExpApp s <$> inject (convert f)
-                                      <*> inject (convert x)
-
-  convert (ExpAbs s p x)    = do
-    p' <- inject $ convert p & runReader 0
-    x' <- local (offset p' ++) (convert x)
-    pure $ ExpAbs s p' x'
-
-  convert (ExpVar (s, b))   = g . l <$> ask
-    where
-      f (x, _)   = x == b
-
-      l m        = do
-        idx  <- findIndex f m
-        idx' <- lookup b m
-        pure (idx, idx')
-
-      g Nothing  = ExpExt (s, b)
-      g (Just x) = ExpVar (s, b, x)
+data InferError
+  = UnknownTypeConstructor Text
+  | KindMismatch Kind Kind
+  | InfiniteKind Text Kind
+  | Undefined Span Text
+  | Unbound Span Text
+  | Infinite Text Ty
+  | Mismatch Ty Ty
+  deriving Show

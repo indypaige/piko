@@ -11,6 +11,9 @@ build-type:     Simple
 library
   exposed-modules:
       Piko.Ast
+      Piko.Convert
+      Piko.Counter
+      Piko.Infer
   hs-source-dirs:
       src
   default-extensions:
