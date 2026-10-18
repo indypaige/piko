@@ -289,12 +289,12 @@ class TyOf a where
 
 instance TyOf (Exp Typed) where
   tyOf = \case
-    ExpVar (_, t) -> t
-    ExpApp (_, t) _ _     -> t
-    ExpAbs (_, t) _ _  -> t
-    ExpLet (_, t) _ _ _     -> t
-    ExpLit (_, t) _       -> t
-    ExpExt (_, t)    -> t
+    ExpVar (_, t)       -> t
+    ExpApp (_, t) _ _   -> t
+    ExpAbs (_, t) _ _   -> t
+    ExpLet (_, t) _ _ _ -> t
+    ExpLit (_, t) _     -> t
+    ExpExt (_, t)       -> t
 
 data InferError
   = UnknownTypeConstructor Text
