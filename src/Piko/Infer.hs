@@ -10,6 +10,7 @@ import qualified Data.Set as Set
 import Effectful.Reader.Static
 import Data.Text (Text, pack)
 import Effectful.Error.Static
+import Piko.Reduce (reduce)
 import Data.Map (Map)
 import Data.Set (Set)
 import Piko.Convert
@@ -362,3 +363,10 @@ instance Inferable (Ast.Exp Infer) where
       let p' = convert @Ast.Pat @Infer @Typed p & runPureEff
 
       pure $ Ast.ExpAbs (s, (pt :-> xt)) p' x'
+
+instance Convert Ast.Exp Infer Typed where
+  type Es Ast.Exp Infer Typed = '[Error Ast.InferError]
+
+  convert exp = do
+    _ <- ty exp
+    ty (reduce exp)

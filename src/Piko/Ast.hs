@@ -77,6 +77,17 @@ offset (PatLst _ l)                  = l >>= offset
 offset (PatVar (_, b', x))           = [(b', x)]
 offset (PatLit _ _)                  = mempty
 
+flatten :: Exp Infer -> [Exp Infer]
+flatten (ExpTup _ items) = items >>= flatten
+flatten (ExpLst _ items) = items >>= flatten
+flatten other                = [other]
+
+arity :: Pat Infer -> Int
+arity (PatTup _ l) = sum $ arity <$> l
+arity (PatLst _ l) = sum $ arity <$> l
+arity (PatVar _)   = 1
+arity _            = 0
+
 data Exp (x :: X)
   = ExpLet (XExpLet x) (Pat x) (Exp x) (Exp x)
   | ExpApp (XExpApp x) (Exp x) (Exp x)
