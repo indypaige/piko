@@ -32,7 +32,7 @@ instance Semigroup Span where
 instance Monoid Span where
   mempty = Span (-1) (-1)
 
-data X = Parse | Infer | Typed | Inter
+data X = Parse | Infer | Typed | Build
 
 type family XLitStr (x :: X)
 type family XLitDec (x :: X)
@@ -157,27 +157,27 @@ type instance XPatVar Typed = XPatVar Infer
 type instance XPatLit Typed = XPatLit Infer
 type instance XPatExt Typed = XPatExt Infer
 
-type instance XLitStr Inter = XLitStr Typed
-type instance XLitDec Inter = XLitDec Typed
-type instance XLitNum Inter = XLitNum Typed
-type instance XLitBin Inter = XLitBin Typed
-type instance XLitChr Inter = XLitChr Typed
-type instance XLitExt Inter = XLitExt Typed
+type instance XLitStr Build = XLitStr Typed
+type instance XLitDec Build = XLitDec Typed
+type instance XLitNum Build = XLitNum Typed
+type instance XLitBin Build = XLitBin Typed
+type instance XLitChr Build = XLitChr Typed
+type instance XLitExt Build = XLitExt Typed
 
-type instance XPatLst Inter = XPatLst Typed
-type instance XPatTup Inter = XPatTup Typed
-type instance XPatVar Inter = XPatVar Typed
-type instance XPatLit Inter = XPatLit Typed
-type instance XPatExt Inter = XPatExt Typed
+type instance XPatLst Build = XPatLst Typed
+type instance XPatTup Build = XPatTup Typed
+type instance XPatVar Build = XPatVar Typed
+type instance XPatLit Build = XPatLit Typed
+type instance XPatExt Build = XPatExt Typed
 
-type instance XExpLst Inter = XExpLst Typed
-type instance XExpTup Inter = XExpTup Typed
-type instance XExpVar Inter = XExpVar Typed
-type instance XExpLit Inter = XExpLit Typed
-type instance XExpAbs Inter = XExpAbs Typed
-type instance XExpApp Inter = XExpApp Typed
-type instance XExpExt Inter = XExpExt Typed
-type instance XExpLet Inter = XExpLet Typed
+type instance XExpLst Build = XExpLst Typed
+type instance XExpTup Build = XExpTup Typed
+type instance XExpVar Build = XExpVar Typed
+type instance XExpLit Build = XExpLit Typed
+type instance XExpAbs Build = XExpAbs Typed
+type instance XExpApp Build = XExpApp Typed
+type instance XExpExt Build = XExpExt Typed
+type instance XExpLet Build = XExpLet Typed
 
 type instance XLitStr Infer = XLitStr Parse
 type instance XLitDec Infer = XLitDec Parse
@@ -259,17 +259,17 @@ deriving instance Eq (Pat Typed)
 deriving instance Eq (Lit Typed)
 deriving instance Eq (Exp Typed)
 
-deriving instance Show (Pat Inter)
-deriving instance Show (Lit Inter)
-deriving instance Show (Exp Inter)
+deriving instance Show (Pat Build)
+deriving instance Show (Lit Build)
+deriving instance Show (Exp Build)
 
-deriving instance Ord (Pat Inter)
-deriving instance Ord (Lit Inter)
-deriving instance Ord (Exp Inter)
+deriving instance Ord (Pat Build)
+deriving instance Ord (Lit Build)
+deriving instance Ord (Exp Build)
 
-deriving instance Eq (Pat Inter)
-deriving instance Eq (Lit Inter)
-deriving instance Eq (Exp Inter)
+deriving instance Eq (Pat Build)
+deriving instance Eq (Lit Build)
+deriving instance Eq (Exp Build)
 
 infixl 8 :&:
 

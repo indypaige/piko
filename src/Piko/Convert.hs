@@ -4,10 +4,12 @@ import Effectful.Internal.Effect (type (++))
 import Effectful.State.Static.Local
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Piko.Ast as Ast
 import Effectful.Reader.Static
 import Effectful.Error.Static
 import Data.Text (Text)
 import Data.Traversable
+import Piko.Ast (X(..))
 import Data.Map (Map)
 import Data.Set (Set)
 import Control.Monad
@@ -20,8 +22,6 @@ import Data.List
 import Effectful
 import Data.Kind
 import Data.Void
-import qualified Piko.Ast as Ast
-import Piko.Ast (X(..))
 import Data.Int
 
 type family (!~) (a :: k) (b :: k) :: Constraint where
@@ -37,16 +37,16 @@ class b !~ c => Convert (a :: X -> Type) b c where
   convertMany = traverse convert
 
 instance ( Convert a Parse Typed
-         , Convert a Typed Inter
-         , Subset (Es a Parse Typed) (Es a Parse Inter)
-         , Subset (Es a Typed Inter) (Es a Parse Inter)
-         ) => Convert a Parse Inter where
-  type Es a Parse Inter = Es a Parse Typed ++ Es a Typed Inter
+         , Convert a Typed Build
+         , Subset (Es a Parse Typed) (Es a Parse Build)
+         , Subset (Es a Typed Build) (Es a Parse Build)
+         ) => Convert a Parse Build where
+  type Es a Parse Build = Es a Parse Typed ++ Es a Typed Build
 
-  convert = (inject . convert @a @Typed @Inter)
+  convert = (inject . convert @a @Typed @Build)
         <=< (inject . convert @a @Parse @Typed)
 
-  convertMany = (inject . convertMany @a @Typed @Inter)
+  convertMany = (inject . convertMany @a @Typed @Build)
         <=< (inject . convertMany @a @Parse @Typed)
 
 instance ( Convert a Parse Infer
@@ -82,8 +82,8 @@ instance Convert Ast.Lit Parse Infer where
   convert (Ast.LitBin x b) = pure $ Ast.LitBin x b
   convert (Ast.LitExt x)   = pure $ absurd x
 
-instance Convert Ast.Lit Typed Inter where
-  type Es Ast.Lit Typed Inter = '[]
+instance Convert Ast.Lit Typed Build where
+  type Es Ast.Lit Typed Build = '[]
 
   convert (Ast.LitNum x n) = pure $ Ast.LitNum x n
   convert (Ast.LitDec x d) = pure $ Ast.LitDec x d
@@ -122,8 +122,8 @@ instance Convert Ast.Pat Infer Typed where
   convert (Ast.PatVar x)   = pure $ Ast.PatVar x
   convert (Ast.PatExt x)   = pure $ absurd x
 
-instance Convert Ast.Pat Typed Inter where
-  type Es Ast.Pat Typed Inter = '[]
+instance Convert Ast.Pat Typed Build where
+  type Es Ast.Pat Typed Build = '[]
 
   convert (Ast.PatLst x a) = Ast.PatLst x <$> traverse convert a
   convert (Ast.PatTup x a) = Ast.PatTup x <$> traverse convert a
