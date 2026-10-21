@@ -20,16 +20,8 @@ data Ctx = Ctx
   { _power :: Power
   , _binds :: [(Text, (Power, Power))]
   }
-
-bp :: [Text] -> Int -> Int -> [(Text, (Power, Power))]
-bp xs l r = (, (l, r)) <$> xs
-
 emptyCtx :: Ctx
-emptyCtx = Ctx 0 $ concat [ bp ["+", "-"] 5 6
-                          , bp ["*", "/"] 7 8
-                          , bp ["."] 14 13
-                          , bp ["="] 2 1
-                          ]
+emptyCtx = Ctx 0 Ast.builtinOperators
 
 makeLenses ''Ctx
 

@@ -152,14 +152,17 @@ type Subst       = Map Text Ast.Ty
 
 type Scope       = Map Text Ast.Scheme
 
+type Builtins    = Map Text Ast.Scheme
+
 type Inference es
-  =  ( Writer Constraints :> es
-     , Error Ast.InferError :> es
-     , Reader Context :> es
-     , State Local :> es
-     , State Scope :> es
-     , Counter :> es
-     )
+  = ( Error Ast.InferError :> es
+    , Writer Constraints :> es
+    , Reader Builtins :> es
+    , Reader Context :> es
+    , State Local :> es
+    , State Scope :> es
+    , Counter :> es
+    )
 
 infixr 8 <=>
 
@@ -272,27 +275,28 @@ ty :: ( Substitutable (Resolved a)
       , Error Ast.InferError :> es
       , Inferable a
       ) => a -> Eff es (Resolved a)
-ty = tyWithKinds emptyLocal
+ty = tyWithKinds Ast.builtinSchemes emptyLocal
 
 tyWithKinds :: ( Substitutable (Resolved a)
                , Error Ast.InferError :> es
                , Inferable a
-               ) => Local -> a -> Eff es (Resolved a)
+               ) => Builtins -> Local -> a -> Eff es (Resolved a)
 
-tyWithKinds kindLocal = tyWithEnv kindLocal mempty
+tyWithKinds builtins kindLocal = tyWithEnv builtins kindLocal mempty
 
 tyWithEnv :: ( Substitutable (Resolved a)
              , Error Ast.InferError :> es
              , Inferable a
-             ) => Local -> Scope -> a -> Eff es (Resolved a)
+             ) => Builtins -> Local -> Scope -> a -> Eff es (Resolved a)
 
-tyWithEnv kindLocal valueLocal inf = fst <$> m
+tyWithEnv builtins kindLocal valueLocal inf = fst <$> m
   where
     m      = f inf & runCounter
              . runWriter @Constraints
              . runReader @Context []
              . evalState @Scope valueLocal
              . evalState @Local kindLocal
+             . runReader @Builtins builtins
 
     f inf = do
       (t, cs) <- inject $ infer inf & runWriter @Constraints

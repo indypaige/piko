@@ -321,3 +321,26 @@ data Fn x = Fn
   { sig :: Maybe Ty
   , fun :: Exp x
   }
+
+builtinOperators :: [(Text, (Int, Int))]
+builtinOperators = concat [ bp ["+", "-", ".+", ".-"] 5 6
+                          , bp ["*", "/", ".*", "./"] 7 8
+                          ]
+  where
+    bp xs l r = (, (l, r)) <$> xs
+
+builtinSchemes :: Map Text Scheme
+builtinSchemes = Map.fromList [ ("+", f n3)
+                              , ("-", f n3)
+                              , ("*", f n3)
+                              , ("/", f n3)
+                              , (".+", f d3)
+                              , (".-", f d3)
+                              , (".*", f d3)
+                              , ("./", f d3)
+                              ]
+  where
+    f m = mempty :&: m
+    n3  = TyNum :-> TyNum :-> TyNum
+    d3  = TyDec :-> TyDec :-> TyDec
+
