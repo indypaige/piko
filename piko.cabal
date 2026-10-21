@@ -14,6 +14,8 @@ library
       Piko.Convert
       Piko.Counter
       Piko.Infer
+      Piko.Inter
+      Piko.Parse
       Piko.Reduce
   hs-source-dirs:
       src
@@ -54,5 +56,8 @@ library
     , effectful-core
     , effectful-th
     , lens
+    , megaparsec
+    , mtl
     , text
+    , transformers
   default-language: Haskell2010

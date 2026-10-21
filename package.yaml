@@ -34,12 +34,15 @@ default-extensions:
 
 dependencies:
         - effectful-core
+        - transformers
         - effectful-th
+        - megaparsec
         - containers
         - effectful
         - lens
         - base
         - text
+        - mtl
 
 library:
         source-dirs: src

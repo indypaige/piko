@@ -284,6 +284,17 @@ data Kind
            , Eq
            )
 
+class SpanOf a where
+  spanOf :: a -> Span
+
+instance SpanOf (Exp Parse) where
+  spanOf (ExpVar (s, _))  = s
+  spanOf (ExpApp s _ _)   = s
+  spanOf (ExpAbs s _ _)   = s
+  spanOf (ExpLet s _ _ _) = s
+  spanOf (ExpLit s _)     = s
+  spanOf (ExpExt s)       = absurd s
+
 class TyOf a where
   tyOf :: a -> Ty
 
@@ -305,3 +316,8 @@ data InferError
   | Infinite Text Ty
   | Mismatch Ty Ty
   deriving Show
+
+data Fn x = Fn
+  { sig :: Maybe Ty
+  , fun :: Exp x
+  }
