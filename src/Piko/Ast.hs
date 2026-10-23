@@ -55,6 +55,7 @@ type family XExpLit (x :: X)
 type family XExpAbs (x :: X)
 type family XExpApp (x :: X)
 type family XExpExt (x :: X)
+type family XExpCnd (x :: X)
 
 data Lit (x :: X)
   = LitStr (XLitStr x) String
@@ -90,6 +91,7 @@ arity _            = 0
 
 data Exp (x :: X)
   = ExpLet (XExpLet x) (Pat x) (Exp x) (Exp x)
+  | ExpCnd (XExpCnd x) (Exp x) (Exp x) (Exp x)
   | ExpApp (XExpApp x) (Exp x) (Exp x)
   | ExpAbs (XExpAbs x) (Pat x) (Exp x)
   | ExpLst (XExpLst x) [Exp x]
@@ -107,6 +109,7 @@ data Ty
            , Eq
            )
 
+infixr 9 :->
 pattern (:->) a b = TyApp (TyApp (TyCon "->") a) b
 
 pattern TyTup ts <- (tupleArgs -> Just ts)
@@ -150,6 +153,8 @@ type instance XExpExt Typed = (XExpExt Infer, Ty)
 
 type instance XPatVar Infer = (Span, Text, Int)
 
+type instance XExpCnd Typed = (XExpCnd Infer, Ty)
+
 type instance XLitExt Typed = XLitExt Infer
 type instance XPatLst Typed = XPatLst Infer
 type instance XPatTup Typed = XPatTup Infer
@@ -163,6 +168,7 @@ type instance XLitNum Build = XLitNum Typed
 type instance XLitBin Build = XLitBin Typed
 type instance XLitChr Build = XLitChr Typed
 type instance XLitExt Build = XLitExt Typed
+type instance XExpCnd Build = XExpCnd Typed
 
 type instance XPatLst Build = XPatLst Typed
 type instance XPatTup Build = XPatTup Typed
@@ -195,6 +201,7 @@ type instance XExpLst Infer = XExpLst Parse
 type instance XExpTup Infer = XExpTup Parse
 type instance XExpLit Infer = XExpLit Parse
 type instance XExpApp Infer = XExpApp Parse
+type instance XExpCnd Infer = XExpCnd Parse
 
 type instance XExpExt Infer = (Span, Text)
 type instance XPatVar Parse = (Span, Text)
@@ -212,6 +219,7 @@ type instance XPatTup Parse = Span
 type instance XPatLit Parse = Span
 type instance XPatExt Parse = Void
 
+type instance XExpCnd Parse = Span
 type instance XExpLst Parse = Span
 type instance XExpTup Parse = Span
 type instance XExpApp Parse = Span
@@ -306,6 +314,7 @@ instance TyOf (Exp Typed) where
     ExpLet (_, t) _ _ _ -> t
     ExpLit (_, t) _     -> t
     ExpExt (_, t)       -> t
+    ExpCnd (_, t) _ _ _ -> t
 
 data InferError
   = UnknownTypeConstructor Text
@@ -344,3 +353,10 @@ builtinSchemes = Map.fromList [ ("+", f n3)
     n3  = TyNum :-> TyNum :-> TyNum
     d3  = TyDec :-> TyDec :-> TyDec
 
+keywords :: [Text]
+keywords = [ "then"
+           , "else"
+           , "let"
+           , "if"
+           , "in"
+           ]

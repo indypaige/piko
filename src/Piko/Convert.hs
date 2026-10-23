@@ -135,9 +135,13 @@ instance Convert Ast.Pat Typed Build where
 instance Convert Ast.Exp Parse Infer where
   type Es Ast.Exp Parse Infer = '[Reader [(Text, Int)]]
 
+  convert (Ast.ExpCnd s x y z) = Ast.ExpCnd s <$> convert x <*> convert y <*> convert z
+
   convert (Ast.ExpLst s x)     = Ast.ExpLst s <$> traverse convert x
 
   convert (Ast.ExpTup s x)     = Ast.ExpTup s <$> traverse convert x
+
+  convert (Ast.ExpLit s l)     = Ast.ExpLit s <$> inject (convert l)
 
   convert (Ast.ExpLet s p x y) = do
     p' <- inject $ convert p & runReader 0

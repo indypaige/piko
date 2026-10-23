@@ -1,4 +1,4 @@
-aname: piko
+name: piko
 spec-version: 0.36.0
 
 default-extensions:
@@ -36,6 +36,7 @@ dependencies:
         - effectful-core
         - transformers
         - effectful-th
+        - pretty-show
         - megaparsec
         - containers
         - effectful

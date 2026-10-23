@@ -1,8 +1,11 @@
 module Piko.Infer where
 
 import Piko.Ast (X(..), Scheme(..), pattern (:->))
+import qualified Control.Monad.State.Lazy as Lazy
+import qualified Text.Megaparsec as Megaparsec
 import Control.Lens hiding (Context, (<.>))
 import Effectful.Writer.Static.Local
+import qualified Piko.Parse as Parse
 import Effectful.State.Static.Local
 import qualified Piko.Ast as Ast
 import qualified Data.Map as Map
@@ -11,8 +14,10 @@ import Effectful.Reader.Static
 import Data.Text (Text, pack)
 import Effectful.Error.Static
 import Piko.Reduce (reduce)
+import Text.Show.Pretty
 import Data.Map (Map)
 import Data.Set (Set)
+import Control.Monad
 import Piko.Convert
 import Piko.Counter
 import Effectful
@@ -225,6 +230,9 @@ instance Substitutable (Ast.Exp Typed) where
     Ast.ExpLit (_, t) _      -> vars t
     Ast.ExpVar (_, t)        -> vars t
     Ast.ExpExt (_, t)        -> vars t
+    Ast.ExpLst (_, t) _      -> vars t
+    Ast.ExpTup (_, t) _      -> vars t
+    Ast.ExpCnd (_, t) _ _ _  -> vars t
 
   s .$ expr = case expr of
     Ast.ExpApp (c, t) f a    -> Ast.ExpApp (c, s .$ t) (s .$ f) (s .$ a)
@@ -233,7 +241,9 @@ instance Substitutable (Ast.Exp Typed) where
     Ast.ExpLit (c, t) lit    -> Ast.ExpLit (c, s .$ t) lit
     Ast.ExpVar (c, t)        -> Ast.ExpVar (c, s .$ t)
     Ast.ExpExt (c, t)        -> Ast.ExpExt (c, s .$ t)
-
+    Ast.ExpLst (c, t) a      -> Ast.ExpLst (c, s .$ t) a
+    Ast.ExpTup (c, t) b      -> Ast.ExpTup (c, s .$ t) b
+    Ast.ExpCnd (c, t) x y z  -> Ast.ExpCnd (c, s .$ t) x y z
 
 class Inferable a where
   type Resolved a
@@ -303,6 +313,42 @@ tyWithEnv builtins kindLocal valueLocal inf = fst <$> m
       s       <- solve cs
       pure $ s .$ t
 
+instance Inferable (Ast.Pat Infer) where
+  type Resolved (Ast.Pat Infer) = (Ast.Ty, [Ast.Scheme])
+
+  infer = \case
+    Ast.PatVar (_, _, _) -> do
+      t <- freshTy
+      pure (t, [mempty :&: t])
+
+    Ast.PatTup _ ps -> do
+      inferred <- traverse infer ps
+
+      let ts       = map fst inferred
+          bindings = concatMap snd inferred
+          name     = "tup" <> pack (show (length ts))
+          k        = foldr (\_ rest -> Ast.KindArr Ast.KindType rest) Ast.KindType ts
+          t        = foldl Ast.TyApp (Ast.TyCon name) ts
+
+      modify @Local $ \st -> st { tcons = Map.insert name k (tcons st) }
+
+      pure (t, bindings)
+
+    Ast.PatLst _ ps -> do
+      eTy <- freshTy
+      i <- traverse infer ps
+
+      mapM_ (\(t, _) -> t <=> eTy) i
+
+      pure ( Ast.TyApp (Ast.TyCon "lst") eTy
+           , concatMap snd i
+           )
+
+    Ast.PatLit s lit -> do
+      e <- infer (Ast.ExpLit s lit)
+      pure (Ast.tyOf e, [])
+
+
 instance Inferable (Ast.Exp Infer) where
   type Resolved (Ast.Exp Infer) = Ast.Exp Typed
 
@@ -313,7 +359,32 @@ instance Inferable (Ast.Exp Infer) where
     Ast.ExpLit s l@(Ast.LitStr s' l') -> pure $ Ast.ExpLit (s, Ast.TyStr) (Ast.LitStr (s', Ast.TyStr) l')
     Ast.ExpLit s l@(Ast.LitChr s' l') -> pure $ Ast.ExpLit (s, Ast.TyChr) (Ast.LitChr (s', Ast.TyChr) l')
     Ast.ExpLit s   (Ast.LitExt void)  -> pure $ absurd void
-    Ast.ExpExt (s, t)                 -> throwError $ Ast.Unbound s t
+
+    Ast.ExpExt (s, t)                 -> do
+      scoped <- get @Scope
+
+      case Map.lookup t scoped of
+        Just sc -> do
+          x <- instantiate sc
+          pure $ Ast.ExpExt ((s, t), x)
+        Nothing -> do
+          builtins <- ask @Builtins
+          case Map.lookup t builtins of
+            Just sc -> do
+              x <- instantiate sc
+              pure $ Ast.ExpExt ((s, t), x)
+            Nothing -> throwError $ Ast.Unbound s t
+
+    Ast.ExpCnd s x y z                -> do
+      xt <- infer x
+      yt <- infer y
+      zt <- infer z
+
+      Ast.tyOf xt <=> Ast.TyBin
+
+      Ast.tyOf yt <=> Ast.tyOf zt
+
+      pure $ Ast.ExpCnd (s, Ast.tyOf yt) xt yt zt
 
     Ast.ExpLet s p x y                -> do
       (et, cs) <- listen  (infer x)
@@ -334,6 +405,7 @@ instance Inferable (Ast.Exp Infer) where
       let p' = convert @Ast.Pat @Infer @Typed p & runPureEff
 
       pure $ Ast.ExpLet (s, yt) p' (subst .$ et) y'
+
 
     Ast.ExpApp s f a                  -> do
       f' <- infer f
@@ -356,17 +428,32 @@ instance Inferable (Ast.Exp Infer) where
           pure $ Ast.ExpVar ((s, b, (x, y)), v)
         []    -> throwError (Ast.Undefined s b)
 
-    Ast.ExpAbs s p x                  -> do
-      pt <- freshTy
-      let ps = mempty :&: pt
-      x' <- local (ps:) (infer x)
+    Ast.ExpLst s xs -> do
+      xs' <- traverse infer xs
+      t   <- freshTy
+
+      traverse (\x -> Ast.tyOf x <=> t) xs'
+
+      pure $ Ast.ExpLst (s, Ast.TyLst t) xs'
+
+    Ast.ExpTup s xs -> do
+      xs' <- traverse infer xs
+
+      let t = Ast.TyTup (map Ast.tyOf xs')
+
+      pure $ Ast.ExpTup (s, t) xs'
+
+    Ast.ExpAbs s p x -> do
+      (pt, bindings) <- infer p
+      x' <- local @Context (bindings ++) (infer x)
+
       let xt = Ast.tyOf x'
 
       check (pt :-> xt)
 
       let p' = convert @Ast.Pat @Infer @Typed p & runPureEff
 
-      pure $ Ast.ExpAbs (s, (pt :-> xt)) p' x'
+      pure $ Ast.ExpAbs (s, pt :-> xt) p' x'
 
 instance Convert Ast.Exp Infer Typed where
   type Es Ast.Exp Infer Typed = '[Error Ast.InferError]
@@ -374,3 +461,13 @@ instance Convert Ast.Exp Infer Typed where
   convert exp = do
     _ <- ty exp
     ty (reduce exp)
+
+test :: Text -> IO ()
+test t = case Lazy.evalState (Megaparsec.runParserT (Parse.exp <* Megaparsec.eof) "test.piko" t) Parse.emptyCtx of
+           Left  x -> putStr (Megaparsec.errorBundlePretty x)
+           Right y -> let x = convert @Ast.Exp @Parse @Typed y
+                            & runPureEff
+                            . runErrorNoCallStack
+                            . runReader []
+                      in pPrint x
+

@@ -13,6 +13,8 @@ shift d c (Ast.ExpLet a p x y) = Ast.ExpLet a p (shift d (c + l) x) (shift d (c 
   where
     l = Ast.arity p
 
+shift d c (Ast.ExpCnd s x y z) = Ast.ExpCnd s (shift d c x) (shift d c y) (shift d c z)
+
 shift d c (Ast.ExpAbs x p a)   = Ast.ExpAbs x p (shift d (c + l) a)
   where
     l = Ast.arity p
@@ -39,6 +41,8 @@ subst j s = f 0
             l = Ast.arity p
 
         g (Ast.ExpApp s' f' x)           = Ast.ExpApp s' (f d f') (f d x)
+
+        g (Ast.ExpCnd s x y z)           = Ast.ExpCnd s (f d x) (f d y) (f d z)
 
         g (Ast.ExpAbs a p x)             = Ast.ExpAbs a p (f (d + l) x)
           where
@@ -72,6 +76,11 @@ reduce (Ast.ExpLet _ p x y) = reduce $ beta p (reduce x) y
 reduce (Ast.ExpApp a f x)   = case (reduce f, reduce x) of
                                 (Ast.ExpAbs _ p f', x') -> reduce (beta p x' f')
                                 (f', x')               -> Ast.ExpApp a f' x'
+
+reduce (Ast.ExpCnd s x y z) = case reduce x of
+                                (Ast.ExpLit _ (Ast.LitBin _ True))  -> reduce y
+                                (Ast.ExpLit _ (Ast.LitBin _ False)) -> reduce z
+                                _                                   -> Ast.ExpCnd s (reduce x) (reduce y) (reduce z)
 
 reduce (Ast.ExpAbs a p x)   = Ast.ExpAbs a p $ reduce x
 

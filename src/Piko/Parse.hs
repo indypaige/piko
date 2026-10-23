@@ -6,6 +6,7 @@ import Control.Monad.Trans.Class
 import qualified Piko.Ast as Ast
 import Text.Megaparsec.Char
 import Prelude hiding (exp)
+import Text.Show.Pretty
 import Piko.Ast (X(..))
 import Data.Text (Text)
 import Text.Megaparsec
@@ -79,7 +80,12 @@ conid = fst <$> match m
              ]
 
 varid :: Parser Text
-varid = fst <$> match m
+varid = do
+  x <- fst <$> match m
+
+  if x `elem` Ast.keywords
+    then empty
+    else pure x
   where
     m = (letterChar <|> f) >> many (alphaNumChar <|> f)
     f = char '_'
@@ -90,16 +96,20 @@ varsym = fst <$> match m
     m = oneOf symbols >> many (oneOf symbolsC)
 
 lit :: Parser (Ast.Lit Parse)
-lit = msum [ try dec
+lit = msum [ bin
+           , try dec
            , num
            , str
            , chr
            ]
   where
     str = spanned' (char '"' >> manyTill Lexer.charLiteral (char '"')) ?? Ast.LitStr
-    chr = spanned' (char '\'' *> Lexer.charLiteral<* char '\'')        ?? Ast.LitChr
+    chr = spanned' (char '\'' *> Lexer.charLiteral <* char '\'')       ?? Ast.LitChr
     num = spanned' (Lexer.signed hspace Lexer.decimal)                 ?? Ast.LitNum
     dec = spanned' (Lexer.signed hspace Lexer.float)                   ?? Ast.LitDec
+    bin = spanned' b                                                   ?? Ast.LitBin
+      where
+        b = (True <$ "true") <|> (False <$ "false")
 
 dot, comma :: Parser Text
 comma = symbol ","
@@ -150,11 +160,41 @@ exp = m
 
     lit' = spanned' lit ?? Ast.ExpLit
     abs  = spanned' ((,) <$> pat <* dot <*> exp) ?? (uncurry . Ast.ExpAbs)
-    var  = Ast.ExpVar <$> spanned varid
+    var  = Ast.ExpVar <$> spanned (varid <|> try (parens varsym))
+
+    let' = do
+      (s, _) <- spanned "let"
+      hspace
+      b <- pat
+      hspace
+      "="
+      hspace
+      e <- exp
+      hspace
+      "in"
+      hspace
+      (s', n) <- spanned exp
+      pure $ Ast.ExpLet (s <> s') b e n
+
+    cnd  = do
+      (s, _) <- spanned "if"
+      hspace
+      c <- exp
+      hspace
+      "then"
+      hspace
+      t <- exp
+      hspace
+      "else"
+      hspace
+      (s', f) <- spanned exp
+      pure $ Ast.ExpCnd (s <> s') c t f
 
     atm  = msum [ try abs
-                , var
                 , lit'
+                , try cnd
+                , try let'
+                , var
                 , lst
                 , try (parens (withBp 0 exp))
                 , tup
@@ -163,7 +203,10 @@ exp = m
     app = do
       f <- spanned atm
 
-      x <- many $ try $ spanned (hspace *> atm)
+      x <- many $ try $ spanned $ do
+        hspace
+        notFollowedBy (oneOf ['+', '-'])
+        atm
 
       let y = foldl (\(s, a) (s', b) ->
                        let s'' = s <> s'
@@ -182,7 +225,7 @@ bindingPower = do
   rBp <- Lexer.decimal
   binds %= ((sym, (lBp, rBp)):)
 
-test :: Parser a -> Text -> IO ()
-test m t = case Lazy.evalState (runParserT (exp <* eof) "test.piko" t) emptyCtx of
+test :: Show a => Parser a -> Text -> IO ()
+test m t = case Lazy.evalState (runParserT (m <* eof) "test.piko" t) emptyCtx of
              Left x -> putStr (errorBundlePretty x)
-             Right x -> print x
+             Right x -> pPrint x
