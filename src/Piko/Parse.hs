@@ -106,13 +106,15 @@ lit = msum [ bin
            , try dec
            , num
            , str
-           , chr
+           , try chr
+           , sym
            ]
   where
     str = spanned' (char '"' >> manyTill Lexer.charLiteral (char '"')) ?? Ast.LitStr
     chr = spanned' (char '\'' *> Lexer.charLiteral <* char '\'')       ?? Ast.LitChr
     num = spanned' (Lexer.signed hspace Lexer.decimal)                 ?? Ast.LitNum
     dec = spanned' (Lexer.signed hspace Lexer.float)                   ?? Ast.LitDec
+    sym = spanned' (char '\'' *> varid)                                ?? Ast.LitSym
     bin = spanned' b                                                   ?? Ast.LitBin
       where
         b = (True <$ "true") <|> (False <$ "false")

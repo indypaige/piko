@@ -57,6 +57,7 @@ type family XExpAbs (x :: X)
 type family XExpApp (x :: X)
 type family XExpExt (x :: X)
 type family XExpCnd (x :: X)
+type family XLitSym (x :: X)
 
 data Lit (x :: X)
   = LitStr (XLitStr x) String
@@ -64,6 +65,7 @@ data Lit (x :: X)
   | LitNum (XLitNum x) Int64
   | LitBin (XLitBin x) Bool
   | LitChr (XLitChr x) Char
+  | LitSym (XLitSym x) Text
   | LitNil (XLitNil x)
   | LitExt (XLitExt x)
 
@@ -145,6 +147,7 @@ type instance XLitNum Typed = (XLitNum Infer, Ty)
 type instance XLitBin Typed = (XLitBin Infer, Ty)
 type instance XLitChr Typed = (XLitChr Infer, Ty)
 type instance XLitNil Typed = (XLitNil Infer, Ty)
+type instance XLitSym Typed = (XLitSym Infer, Ty)
 
 type instance XExpVar Typed = (XExpVar Infer, Ty)
 type instance XExpLst Typed = (XExpLst Infer, Ty)
@@ -171,6 +174,7 @@ type instance XLitBin Infer = XLitBin Parse
 type instance XLitChr Infer = XLitChr Parse
 type instance XLitExt Infer = XLitExt Parse
 type instance XLitNil Infer = XLitNil Parse
+type instance XLitSym Infer = XLitSym Parse
 
 type instance XPatLst Infer = XPatLst Parse
 type instance XPatTup Infer = XPatTup Parse
@@ -193,6 +197,7 @@ type instance XLitNum Parse = Span
 type instance XLitBin Parse = Span
 type instance XLitChr Parse = Span
 type instance XLitNil Parse = Span
+type instance XLitSym Parse = Span
 type instance XLitExt Parse = Void
 
 type instance XPatLst Parse = Span
