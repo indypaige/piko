@@ -107,6 +107,10 @@ inferKind = \case
     Just k  -> pure k
     Nothing -> throwError $ Ast.UnknownTypeConstructor n
 
+  Ast.TyTup ts -> do
+    mapM_ check ts
+    pure Ast.KindType
+
   Ast.TyVar v -> do
     x <- get @Local
 
@@ -275,6 +279,16 @@ unify a b = do
 
       pure $ s' <.> s
 
+    
+    f (Ast.TyTup xs) (Ast.TyTup ys)
+      | length xs == length ys = do
+          foldM
+            (\s (x, y) -> do
+                s' <- unify (s .$ x) (s .$ y)
+                pure (s' <.> s))
+            mempty
+            (zip xs ys)
+
     f a b = throwError $ Ast.Mismatch a b
 
 solve :: Inference es => [Constraint] -> Eff es Subst
@@ -330,11 +344,7 @@ instance Inferable (Ast.Pat Infer) where
 
       let ts       = map fst inferred
           bindings = concatMap snd inferred
-          name     = "Tup" <> pack (show (length ts))
-          k        = foldr (\_ rest -> Ast.KindArr Ast.KindType rest) Ast.KindType ts
-          t        = foldl Ast.TyApp (Ast.TyCon name) ts
-
-      modify @Local $ \st -> st { tcons = Map.insert name k (tcons st) }
+          t        = Ast.TyTup ts
 
       pure (t, bindings)
 

@@ -10,7 +10,6 @@ import Text.Show.Pretty
 import Piko.Ast (X(..))
 import Data.Text (Text)
 import Text.Megaparsec
-
 import Control.Monad
 import Control.Lens
 import Data.Void
@@ -21,6 +20,7 @@ data Ctx = Ctx
   { _power :: Power
   , _binds :: [(Text, (Power, Power))]
   }
+
 emptyCtx :: Ctx
 emptyCtx = Ctx 0 Ast.builtinOperators
 

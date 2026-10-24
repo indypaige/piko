@@ -308,6 +308,8 @@ instance SpanOf (Exp Parse) where
   spanOf (ExpAbs s _ _)   = s
   spanOf (ExpLet s _ _ _) = s
   spanOf (ExpLit s _)     = s
+  spanOf (ExpLst s _)     = s
+  spanOf (ExpTup s _)     = s
   spanOf (ExpExt s)       = absurd s
 
 class TyOf a where
@@ -323,6 +325,7 @@ instance TyOf (Exp Typed) where
     ExpExt (_, t)       -> t
     ExpCnd (_, t) _ _ _ -> t
     ExpLst (_, t) _     -> t
+    ExpTup (_, t) _     -> t
 
 data InferError
   = UnknownTypeConstructor Text
