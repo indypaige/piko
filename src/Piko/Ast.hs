@@ -40,6 +40,7 @@ type family XLitNum (x :: X)
 type family XLitBin (x :: X)
 type family XLitChr (x :: X)
 type family XLitExt (x :: X)
+type family XLitNil (x :: X)
 
 type family XPatLst (x :: X)
 type family XPatTup (x :: X)
@@ -63,6 +64,7 @@ data Lit (x :: X)
   | LitNum (XLitNum x) Int64
   | LitBin (XLitBin x) Bool
   | LitChr (XLitChr x) Char
+  | LitNil (XLitNil x)
   | LitExt (XLitExt x)
 
 data Pat (x :: X)
@@ -78,12 +80,12 @@ offset (PatLst _ l)                  = l >>= offset
 offset (PatVar (_, b', x))           = [(b', x)]
 offset (PatLit _ _)                  = mempty
 
-flatten :: Exp Infer -> [Exp Infer]
+flatten :: Exp x -> [Exp x]
 flatten (ExpTup _ items) = items >>= flatten
 flatten (ExpLst _ items) = items >>= flatten
 flatten other                = [other]
 
-arity :: Pat Infer -> Int
+arity :: Pat x -> Int
 arity (PatTup _ l) = sum $ arity <$> l
 arity (PatLst _ l) = sum $ arity <$> l
 arity (PatVar _)   = 1
@@ -114,25 +116,26 @@ pattern (:->) a b = TyApp (TyApp (TyCon "->") a) b
 
 pattern TyTup ts <- (tupleArgs -> Just ts)
   where
-    TyTup ts = foldl TyApp (TyCon "tup") ts
+    TyTup ts = foldl TyApp (TyCon "Tup") ts
 
 tupleArgs = f []
   where
     f args (TyApp f' x)   = f (x : args) f'
-    f args (TyCon "tup") = Just args
+    f args (TyCon "Tup") = Just args
     f _    _             = Nothing
 
-pattern TyBin     = TyCon "bin"
-pattern TyStr     = TyCon "str"
-pattern TyDec     = TyCon "dec"
-pattern TyChr     = TyCon "chr"
-pattern TyNum     = TyCon "num"
+pattern TyBin     = TyCon "Bin"
+pattern TyStr     = TyCon "Str"
+pattern TyDec     = TyCon "Dec"
+pattern TyChr     = TyCon "Chr"
+pattern TyNum     = TyCon "Num"
+pattern TyNil     = TyCon "Nil"
 
-pattern TyLst a   = TyApp (TyCon "lst") a
+pattern TyLst a   = TyApp (TyCon "Lst") a
 
 instance Plated Ty where
   plate f (TyApp x y) = TyApp <$> f x <*> f y
-  plate _ x          = pure x
+  plate _ x           = pure x
 
 type instance XExpVar Infer = (Span, Text, (Int, Int))
 
@@ -141,6 +144,7 @@ type instance XLitDec Typed = (XLitDec Infer, Ty)
 type instance XLitNum Typed = (XLitNum Infer, Ty)
 type instance XLitBin Typed = (XLitBin Infer, Ty)
 type instance XLitChr Typed = (XLitChr Infer, Ty)
+type instance XLitNil Typed = (XLitNil Infer, Ty)
 
 type instance XExpVar Typed = (XExpVar Infer, Ty)
 type instance XExpLst Typed = (XExpLst Infer, Ty)
@@ -167,6 +171,7 @@ type instance XLitDec Build = XLitDec Typed
 type instance XLitNum Build = XLitNum Typed
 type instance XLitBin Build = XLitBin Typed
 type instance XLitChr Build = XLitChr Typed
+type instance XLitNil Build = XLitNil Typed
 type instance XLitExt Build = XLitExt Typed
 type instance XExpCnd Build = XExpCnd Typed
 
@@ -191,6 +196,7 @@ type instance XLitNum Infer = XLitNum Parse
 type instance XLitBin Infer = XLitBin Parse
 type instance XLitChr Infer = XLitChr Parse
 type instance XLitExt Infer = XLitExt Parse
+type instance XLitNil Infer = XLitNil Parse
 
 type instance XPatLst Infer = XPatLst Parse
 type instance XPatTup Infer = XPatTup Parse
@@ -212,6 +218,7 @@ type instance XLitDec Parse = Span
 type instance XLitNum Parse = Span
 type instance XLitBin Parse = Span
 type instance XLitChr Parse = Span
+type instance XLitNil Parse = Span
 type instance XLitExt Parse = Void
 
 type instance XPatLst Parse = Span
@@ -315,6 +322,7 @@ instance TyOf (Exp Typed) where
     ExpLit (_, t) _     -> t
     ExpExt (_, t)       -> t
     ExpCnd (_, t) _ _ _ -> t
+    ExpLst (_, t) _     -> t
 
 data InferError
   = UnknownTypeConstructor Text
@@ -326,10 +334,13 @@ data InferError
   | Mismatch Ty Ty
   deriving Show
 
-data Fn x = Fn
-  { sig :: Maybe Ty
-  , fun :: Exp x
-  }
+data Fn x = Fn Span (Maybe (Span, Ty)) Text (Exp x)
+
+mapExp :: (Exp x -> Exp y) -> Fn x -> Fn y
+mapExp f (Fn s sig n e) = Fn s sig n (f e)
+
+deriving instance Show (Fn Parse)
+deriving instance Show (Fn Typed)
 
 builtinOperators :: [(Text, (Int, Int))]
 builtinOperators = concat [ bp ["+", "-", ".+", ".-"] 5 6

@@ -97,6 +97,7 @@ varsym = fst <$> match m
 
 lit :: Parser (Ast.Lit Parse)
 lit = msum [ bin
+           , nil
            , try dec
            , num
            , str
@@ -110,6 +111,10 @@ lit = msum [ bin
     bin = spanned' b                                                   ?? Ast.LitBin
       where
         b = (True <$ "true") <|> (False <$ "false")
+
+    nil = do
+      (s, _) <- spanned "nil"
+      pure $ Ast.LitNil s
 
 dot, comma :: Parser Text
 comma = symbol ","
@@ -229,3 +234,52 @@ test :: Show a => Parser a -> Text -> IO ()
 test m t = case Lazy.evalState (runParserT (m <* eof) "test.piko" t) emptyCtx of
              Left x -> putStr (errorBundlePretty x)
              Right x -> pPrint x
+
+ty :: Parser Ast.Ty
+ty = arr
+  where
+    arr = do
+      a <- app
+      f a <|> pure a
+        where
+          f a = do
+            hspace
+            "->"
+            hspace
+            b <- arr
+            pure (a Ast.:-> b)
+
+    app = do
+      xs <- atm `sepBy1` hspace1
+      pure $ foldl1 Ast.TyApp xs
+
+    atm = msum [ Ast.TyCon <$> conid
+               , Ast.TyVar <$> varid
+               , parens ty
+               ]
+
+fn :: Parser (Ast.Fn Parse)
+fn = do
+  sig <- optional $ try $ do
+    (s, n) <- spanned name
+    hspace
+    ":"
+    hspace
+    (s',t) <- spanned ty
+    optional newline
+    pure ((s <> s', t), n)
+
+  (s, n) <- spanned name
+  hspace
+  "="
+  hspace
+  (s',expr) <- spanned exp
+
+  let s'' = s <> s'
+
+  case sig of
+    Nothing                  -> pure $ Ast.Fn s'' Nothing n expr
+    Just (sig, n') | n /= n' -> fail "mismatched type singature and function name"
+    Just (sig, _)            -> pure $ Ast.Fn s'' (Just sig) n expr 
+  where
+    name = varid <|> try (parens varsym)

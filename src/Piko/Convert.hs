@@ -70,6 +70,7 @@ instance Convert Ast.Lit Infer Typed where
   convert (Ast.LitStr x s) = pure $ Ast.LitStr (x, Ast.TyStr) s
   convert (Ast.LitChr x c) = pure $ Ast.LitChr (x, Ast.TyChr) c
   convert (Ast.LitBin x b) = pure $ Ast.LitBin (x, Ast.TyBin) b
+  convert (Ast.LitNil x)   = pure $ Ast.LitNil (x, Ast.TyNil)
   convert (Ast.LitExt x)   = pure $ absurd x
 
 instance Convert Ast.Lit Parse Infer where
@@ -80,6 +81,7 @@ instance Convert Ast.Lit Parse Infer where
   convert (Ast.LitStr x s) = pure $ Ast.LitStr x s
   convert (Ast.LitChr x c) = pure $ Ast.LitChr x c
   convert (Ast.LitBin x b) = pure $ Ast.LitBin x b
+  convert (Ast.LitNil x)   = pure $ Ast.LitNil x
   convert (Ast.LitExt x)   = pure $ absurd x
 
 instance Convert Ast.Lit Typed Build where
@@ -90,6 +92,7 @@ instance Convert Ast.Lit Typed Build where
   convert (Ast.LitStr x s) = pure $ Ast.LitStr x s
   convert (Ast.LitChr x c) = pure $ Ast.LitChr x c
   convert (Ast.LitBin x b) = pure $ Ast.LitBin x b
+  convert (Ast.LitNil x)   = pure $ Ast.LitNil x
   convert (Ast.LitExt x)   = pure $ absurd x
 
 instance Convert Ast.Pat Parse Infer where
@@ -131,6 +134,11 @@ instance Convert Ast.Pat Typed Build where
 
   convert (Ast.PatVar x)   = pure $ Ast.PatVar x
   convert (Ast.PatExt x)   = pure $ absurd x
+
+instance Convert Ast.Fn Parse Infer where
+  type Es Ast.Fn Parse Infer = Es Ast.Exp Parse Infer
+
+  convert (Ast.Fn s sig n expr) = Ast.Fn s sig n <$> convert expr
 
 instance Convert Ast.Exp Parse Infer where
   type Es Ast.Exp Parse Infer = '[Reader [(Text, Int)]]

@@ -4,6 +4,7 @@ import Piko.Ast (X(..), Scheme(..), pattern (:->))
 import qualified Control.Monad.State.Lazy as Lazy
 import qualified Text.Megaparsec as Megaparsec
 import Control.Lens hiding (Context, (<.>))
+import Piko.Reduce (reduce, reduceFn)
 import Effectful.Writer.Static.Local
 import qualified Piko.Parse as Parse
 import Effectful.State.Static.Local
@@ -13,7 +14,6 @@ import qualified Data.Set as Set
 import Effectful.Reader.Static
 import Data.Text (Text, pack)
 import Effectful.Error.Static
-import Piko.Reduce (reduce)
 import Text.Show.Pretty
 import Data.Map (Map)
 import Data.Set (Set)
@@ -31,11 +31,11 @@ data Local = Local
 
 kinds :: Map Text Ast.Kind
 kinds = Map.fromList
-  [ ("num",    Ast.KindType)
-  , ("dec",    Ast.KindType)
-  , ("bin",    Ast.KindType)
-  , ("nil",    Ast.KindType)
-  , ("lst",    Ast.KindArr Ast.KindType Ast.KindType)
+  [ ("Num",    Ast.KindType)
+  , ("Dec",    Ast.KindType)
+  , ("Bin",    Ast.KindType)
+  , ("Nil",    Ast.KindType)
+  , ("Lst",    Ast.KindArr Ast.KindType Ast.KindType)
   , ("IO",     Ast.KindArr Ast.KindType Ast.KindType)
   , ("->",     Ast.KindArr Ast.KindType (Ast.KindArr Ast.KindType Ast.KindType))
   ]
@@ -222,6 +222,10 @@ instance Substitutable a => Substitutable [a] where
   vars   = foldr (Set.union . vars) mempty
   (.$) s = fmap (s .$)
 
+instance Substitutable (Ast.Fn Typed) where
+  vars (Ast.Fn _ mt _ expr)  = vars expr `Set.union` maybe mempty (vars . snd) mt 
+  s .$ (Ast.Fn sp mt n expr) = Ast.Fn sp (fmap (\(sp', t) -> (sp', s .$ t)) mt) n (s .$ expr)
+
 instance Substitutable (Ast.Exp Typed) where
   vars = \case
     Ast.ExpApp (_, t) f a    -> vars t `Set.union` vars f `Set.union` vars a
@@ -326,7 +330,7 @@ instance Inferable (Ast.Pat Infer) where
 
       let ts       = map fst inferred
           bindings = concatMap snd inferred
-          name     = "tup" <> pack (show (length ts))
+          name     = "Tup" <> pack (show (length ts))
           k        = foldr (\_ rest -> Ast.KindArr Ast.KindType rest) Ast.KindType ts
           t        = foldl Ast.TyApp (Ast.TyCon name) ts
 
@@ -340,7 +344,7 @@ instance Inferable (Ast.Pat Infer) where
 
       mapM_ (\(t, _) -> t <=> eTy) i
 
-      pure ( Ast.TyApp (Ast.TyCon "lst") eTy
+      pure ( Ast.TyApp (Ast.TyCon "Lst") eTy
            , concatMap snd i
            )
 
@@ -358,6 +362,7 @@ instance Inferable (Ast.Exp Infer) where
     Ast.ExpLit s l@(Ast.LitBin s' l') -> pure $ Ast.ExpLit (s, Ast.TyBin) (Ast.LitBin (s', Ast.TyBin) l')
     Ast.ExpLit s l@(Ast.LitStr s' l') -> pure $ Ast.ExpLit (s, Ast.TyStr) (Ast.LitStr (s', Ast.TyStr) l')
     Ast.ExpLit s l@(Ast.LitChr s' l') -> pure $ Ast.ExpLit (s, Ast.TyChr) (Ast.LitChr (s', Ast.TyChr) l')
+    Ast.ExpLit s l@(Ast.LitNil s')    -> pure $ Ast.ExpLit (s, Ast.TyNil) (Ast.LitNil (s', Ast.TyNil))
     Ast.ExpLit s   (Ast.LitExt void)  -> pure $ absurd void
 
     Ast.ExpExt (s, t)                 -> do
@@ -455,17 +460,38 @@ instance Inferable (Ast.Exp Infer) where
 
       pure $ Ast.ExpAbs (s, pt :-> xt) p' x'
 
+instance Inferable (Ast.Fn Infer) where
+  type Resolved (Ast.Fn Infer) = Ast.Fn Typed
+
+  infer (Ast.Fn s (Just (s', t)) n expr) = do
+    exprt <- infer expr
+
+    t <=> Ast.tyOf exprt
+
+    pure $ Ast.Fn s (Just (s', t)) n exprt
+
+  infer (Ast.Fn s Nothing n expr) = do
+    exprt <- infer expr
+    pure $ Ast.Fn s Nothing n exprt
+
+instance Convert Ast.Fn Infer Typed where
+  type Es Ast.Fn Infer Typed = '[Error Ast.InferError]
+
+  convert fn = do
+    fn' <- ty fn
+    pure (reduceFn fn')
+
 instance Convert Ast.Exp Infer Typed where
   type Es Ast.Exp Infer Typed = '[Error Ast.InferError]
 
-  convert exp = do
-    _ <- ty exp
-    ty (reduce exp)
+  convert expr = do
+    expr' <- ty expr
+    pure (reduce expr')
 
 test :: Text -> IO ()
-test t = case Lazy.evalState (Megaparsec.runParserT (Parse.exp <* Megaparsec.eof) "test.piko" t) Parse.emptyCtx of
+test t = case Lazy.evalState (Megaparsec.runParserT (Parse.fn <* Megaparsec.eof) "test.piko" t) Parse.emptyCtx of
            Left  x -> putStr (Megaparsec.errorBundlePretty x)
-           Right y -> let x = convert @Ast.Exp @Parse @Typed y
+           Right y -> let x = convert @Ast.Fn @Parse @Typed y
                             & runPureEff
                             . runErrorNoCallStack
                             . runReader []

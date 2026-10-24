@@ -4,9 +4,9 @@ import qualified Piko.Ast as Ast
 import Piko.Ast (X(..))
 import Data.Int
 
-shift :: Int -> Int -> Ast.Exp Infer -> Ast.Exp Infer
-shift d c var@(Ast.ExpVar (s, b, (n, k)))
-  | n >= c                     = Ast.ExpVar (s, b, (n + d, k))
+shift :: Int -> Int -> Ast.Exp Typed -> Ast.Exp Typed
+shift d c var@(Ast.ExpVar ((s, b, (n, k)), t))
+  | n >= c                     = Ast.ExpVar ((s, b, (n + d, k)), t)
   | otherwise                  = var
 
 shift d c (Ast.ExpLet a p x y) = Ast.ExpLet a p (shift d (c + l) x) (shift d (c + l) y)
@@ -28,9 +28,9 @@ shift d c (Ast.ExpTup x items) = Ast.ExpTup x $ shift d c <$> items
 shift d c x                    = x
 
 subst :: Int
-      -> Ast.Exp Infer
-      -> Ast.Exp Infer
-      -> Ast.Exp Infer
+      -> Ast.Exp Typed
+      -> Ast.Exp Typed
+      -> Ast.Exp Typed
 
 subst j s = f 0
   where
@@ -50,27 +50,27 @@ subst j s = f 0
 
         g (Ast.ExpLst x items)           = Ast.ExpLst x $ f d <$> items
 
-        g var@(Ast.ExpVar (x, y, (k, o)))
+        g var@(Ast.ExpVar ((x, y, (k, o)), t))
           | k >= j + d  && k < j + d + o =
               let rel = o - 1 - (k - (j + d))
                   flt = Ast.flatten (shift d 0 s)
               in flt !! rel
 
-          | k >= j + d + o               = Ast.ExpVar (x, y, (k - o, o)) 
+          | k >= j + d + o               = Ast.ExpVar ((x, y, (k - o, o)), t)
           | otherwise                    = var
 
         g x                              = x
 
-beta :: Ast.Pat Infer
-     -> Ast.Exp Infer
-     -> Ast.Exp Infer
-     -> Ast.Exp Infer
+beta :: Ast.Pat Typed
+     -> Ast.Exp Typed
+     -> Ast.Exp Typed
+     -> Ast.Exp Typed
 
 beta p x y = shift (-l) 0 $ subst 0 (shift l 0 x) y
   where
     l = Ast.arity p
 
-reduce :: Ast.Exp Infer -> Ast.Exp Infer
+reduce :: Ast.Exp Typed -> Ast.Exp Typed
 reduce (Ast.ExpLet _ p x y) = reduce $ beta p (reduce x) y
 
 reduce (Ast.ExpApp a f x)   = case (reduce f, reduce x) of
@@ -89,3 +89,6 @@ reduce (Ast.ExpTup a items) = Ast.ExpTup a $ reduce <$> items
 reduce (Ast.ExpLst a items) = Ast.ExpLst a $ reduce <$> items
 
 reduce x                    = x
+
+reduceFn :: Ast.Fn Typed -> Ast.Fn Typed
+reduceFn = Ast.mapExp reduce
