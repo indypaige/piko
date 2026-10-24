@@ -152,12 +152,10 @@ type instance XExpTup Typed = (XExpTup Infer, Ty)
 type instance XExpLit Typed = (XExpLit Infer, Ty)
 type instance XExpAbs Typed = (XExpAbs Infer, Ty)
 type instance XExpApp Typed = (XExpApp Infer, Ty)
-type instance XExpLet Typed = (Span, Ty)
 type instance XExpExt Typed = (XExpExt Infer, Ty)
-
-type instance XPatVar Infer = (Span, Text, Int)
-
 type instance XExpCnd Typed = (XExpCnd Infer, Ty)
+type instance XPatVar Infer = (Span, Text, Int)
+type instance XExpLet Typed = (Span, Ty)
 
 type instance XLitExt Typed = XLitExt Infer
 type instance XPatLst Typed = XPatLst Infer
@@ -309,12 +307,23 @@ mapExp f (Fn s sig n e) = Fn s sig n (f e)
 deriving instance Show (Fn Parse)
 deriving instance Show (Fn Typed)
 
-builtinOperators :: [(Text, (Int, Int))]
-builtinOperators = concat [ bp ["+", "-", ".+", ".-"] 5 6
-                          , bp ["*", "/", ".*", "./"] 7 8
-                          ]
+builtinInfix :: [(Text, (Int, Int))]
+builtinInfix = concat [ bp ["+", "-", ".+", ".-"] 05 06
+                      , bp ["*", "/", ".*", "./"] 07 08
+                      , bp ["."]                  10 09
+                      ]
   where
     bp xs l r = (, (l, r)) <$> xs
+
+builtinPrefix :: [(Text, ((), Int))]
+builtinPrefix = concat [ ]
+  where
+    bp xs p = (, ((), p)) <$> xs
+
+builtinPostfix :: [(Text, (Int, ()))]
+builtinPostfix = concat [ ]
+  where
+    bp xs p = (, (p, ())) <$> xs
 
 builtinSchemes :: Map Text Scheme
 builtinSchemes = Map.fromList [ ("+", f n3)

@@ -17,12 +17,17 @@ import Data.Void
 type Power = Int
 
 data Ctx = Ctx
-  { _power :: Power
-  , _binds :: [(Text, (Power, Power))]
+  { _power    :: Power
+  , _infix'   :: [(Text, (Power, Power))]
+  , _prefix'  :: [(Text, ((), Power))]
+  , _postfix' :: [(Text, (Power, ()))]
   }
 
 emptyCtx :: Ctx
-emptyCtx = Ctx 0 Ast.builtinOperators
+emptyCtx = Ctx 0
+  Ast.builtinInfix
+  Ast.builtinPrefix
+  Ast.builtinPostfix
 
 makeLenses ''Ctx
 
@@ -118,6 +123,7 @@ lit = msum [ bin
 
 dot, comma :: Parser Text
 comma = symbol ","
+colon = symbol ":"
 dot   = symbol "."
 
 pat :: Parser (Ast.Pat Parse)
@@ -140,13 +146,29 @@ exp = m
       f lhs
         where
           f lhs = do
-            sym <- optional $ try $ lookAhead (hspace *> varsym)
-            bps <- use binds
+            sym        <- optional $ try $ lookAhead (hspace *> varsym)
+            infixBps   <- use infix'
+            postfixBps <- use postfix'
 
-            case sym >>= (`lookup` bps) of
-              Nothing     -> pure lhs
-              Just (l, r) -> do
+            case ( sym >>= (`lookup` infixBps)
+                 , sym >>= (`lookup` postfixBps)
+                 ) of
+              (Nothing,  Just (l, ())) -> do
                 min <- use power
+
+                if l < min
+                  then pure lhs
+                  else do
+                    hspace
+                    mid <- spanned varsym
+
+                    let s  = Ast.spanOf lhs <> fst mid
+
+                    f (Ast.ExpApp s (Ast.ExpVar mid) lhs)
+
+              (Just (l, r), Nothing)   -> do
+                min <- use power
+
                 if l < min
                   then pure lhs
                   else do
@@ -159,12 +181,13 @@ exp = m
                         f' = Ast.ExpApp s' (Ast.ExpVar mid) lhs
 
                     f (Ast.ExpApp s f' rhs)
+              _ -> pure lhs
 
     lst  = spanned' (square (exp `sepBy` comma)) ?? Ast.ExpLst
     tup  = spanned' (parens (exp `sepBy` comma)) ?? Ast.ExpTup
 
     lit' = spanned' lit ?? Ast.ExpLit
-    abs  = spanned' ((,) <$> pat <* dot <*> exp) ?? (uncurry . Ast.ExpAbs)
+    abs  = spanned' ((,) <$> pat <* colon <*> exp) ?? (uncurry . Ast.ExpAbs)
     var  = Ast.ExpVar <$> spanned (varid <|> try (parens varsym))
 
     let' = do
@@ -196,6 +219,7 @@ exp = m
       pure $ Ast.ExpCnd (s <> s') c t f
 
     atm  = msum [ try abs
+                , try pfx
                 , lit'
                 , try cnd
                 , try let'
@@ -204,6 +228,17 @@ exp = m
                 , try (parens (withBp 0 exp))
                 , tup
                 ]
+
+    pfx = do
+      (s, op)   <- spanned varsym
+      prefixBps <- use prefix'
+
+      case lookup op prefixBps of
+        Nothing      -> fail "not a prefix operator"
+        Just ((), r) -> do
+          rhs <- withBp r (hspace *> exp)
+          let s' = s <> Ast.spanOf rhs
+          pure $ Ast.ExpApp s (Ast.ExpVar (s, op)) rhs
 
     app = do
       f <- spanned atm
@@ -228,7 +263,7 @@ bindingPower = do
   lBp <- Lexer.decimal
   hspace
   rBp <- Lexer.decimal
-  binds %= ((sym, (lBp, rBp)):)
+  infix' %= ((sym, (lBp, rBp)):)
 
 test :: Show a => Parser a -> Text -> IO ()
 test m t = case Lazy.evalState (runParserT (m <* eof) "test.piko" t) emptyCtx of
