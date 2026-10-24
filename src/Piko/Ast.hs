@@ -32,7 +32,7 @@ instance Semigroup Span where
 instance Monoid Span where
   mempty = Span (-1) (-1)
 
-data X = Parse | Infer | Typed | Build
+data X = Parse | Infer | Typed
 
 type family XLitStr (x :: X)
 type family XLitDec (x :: X)
@@ -166,30 +166,6 @@ type instance XPatVar Typed = XPatVar Infer
 type instance XPatLit Typed = XPatLit Infer
 type instance XPatExt Typed = XPatExt Infer
 
-type instance XLitStr Build = XLitStr Typed
-type instance XLitDec Build = XLitDec Typed
-type instance XLitNum Build = XLitNum Typed
-type instance XLitBin Build = XLitBin Typed
-type instance XLitChr Build = XLitChr Typed
-type instance XLitNil Build = XLitNil Typed
-type instance XLitExt Build = XLitExt Typed
-type instance XExpCnd Build = XExpCnd Typed
-
-type instance XPatLst Build = XPatLst Typed
-type instance XPatTup Build = XPatTup Typed
-type instance XPatVar Build = XPatVar Typed
-type instance XPatLit Build = XPatLit Typed
-type instance XPatExt Build = XPatExt Typed
-
-type instance XExpLst Build = XExpLst Typed
-type instance XExpTup Build = XExpTup Typed
-type instance XExpVar Build = XExpVar Typed
-type instance XExpLit Build = XExpLit Typed
-type instance XExpAbs Build = XExpAbs Typed
-type instance XExpApp Build = XExpApp Typed
-type instance XExpExt Build = XExpExt Typed
-type instance XExpLet Build = XExpLet Typed
-
 type instance XLitStr Infer = XLitStr Parse
 type instance XLitDec Infer = XLitDec Parse
 type instance XLitNum Infer = XLitNum Parse
@@ -273,18 +249,6 @@ deriving instance Ord (Exp Typed)
 deriving instance Eq (Pat Typed)
 deriving instance Eq (Lit Typed)
 deriving instance Eq (Exp Typed)
-
-deriving instance Show (Pat Build)
-deriving instance Show (Lit Build)
-deriving instance Show (Exp Build)
-
-deriving instance Ord (Pat Build)
-deriving instance Ord (Lit Build)
-deriving instance Ord (Exp Build)
-
-deriving instance Eq (Pat Build)
-deriving instance Eq (Lit Build)
-deriving instance Eq (Exp Build)
 
 infixl 8 :&:
 

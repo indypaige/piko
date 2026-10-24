@@ -36,19 +36,6 @@ class b !~ c => Convert (a :: X -> Type) b c where
   convertMany :: [a b] -> Eff (Es a b c) [a c]
   convertMany = traverse convert
 
-instance ( Convert a Parse Typed
-         , Convert a Typed Build
-         , Subset (Es a Parse Typed) (Es a Parse Build)
-         , Subset (Es a Typed Build) (Es a Parse Build)
-         ) => Convert a Parse Build where
-  type Es a Parse Build = Es a Parse Typed ++ Es a Typed Build
-
-  convert = (inject . convert @a @Typed @Build)
-        <=< (inject . convert @a @Parse @Typed)
-
-  convertMany = (inject . convertMany @a @Typed @Build)
-        <=< (inject . convertMany @a @Parse @Typed)
-
 instance ( Convert a Parse Infer
          , Convert a Infer Typed
          , Subset (Es a Parse Infer) (Es a Parse Typed)
@@ -84,17 +71,6 @@ instance Convert Ast.Lit Parse Infer where
   convert (Ast.LitNil x)   = pure $ Ast.LitNil x
   convert (Ast.LitExt x)   = pure $ absurd x
 
-instance Convert Ast.Lit Typed Build where
-  type Es Ast.Lit Typed Build = '[]
-
-  convert (Ast.LitNum x n) = pure $ Ast.LitNum x n
-  convert (Ast.LitDec x d) = pure $ Ast.LitDec x d
-  convert (Ast.LitStr x s) = pure $ Ast.LitStr x s
-  convert (Ast.LitChr x c) = pure $ Ast.LitChr x c
-  convert (Ast.LitBin x b) = pure $ Ast.LitBin x b
-  convert (Ast.LitNil x)   = pure $ Ast.LitNil x
-  convert (Ast.LitExt x)   = pure $ absurd x
-
 instance Convert Ast.Pat Parse Infer where
   type Es Ast.Pat Parse Infer = '[Reader Int]
 
@@ -114,19 +90,8 @@ instance Convert Ast.Pat Parse Infer where
             where
               f s = fmap (s+1,) . local (const (s :: Int)) . convert
 
-
 instance Convert Ast.Pat Infer Typed where
   type Es Ast.Pat Infer Typed = '[]
-
-  convert (Ast.PatLst x a) = Ast.PatLst x <$> traverse convert a
-  convert (Ast.PatTup x a) = Ast.PatTup x <$> traverse convert a
-  convert (Ast.PatLit x a) = Ast.PatLit x <$> convert a
-
-  convert (Ast.PatVar x)   = pure $ Ast.PatVar x
-  convert (Ast.PatExt x)   = pure $ absurd x
-
-instance Convert Ast.Pat Typed Build where
-  type Es Ast.Pat Typed Build = '[]
 
   convert (Ast.PatLst x a) = Ast.PatLst x <$> traverse convert a
   convert (Ast.PatTup x a) = Ast.PatTup x <$> traverse convert a
