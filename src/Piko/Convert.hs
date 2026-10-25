@@ -58,6 +58,7 @@ instance Convert Ast.Lit Infer Typed where
   convert (Ast.LitChr x c) = pure $ Ast.LitChr (x, Ast.TyChr) c
   convert (Ast.LitBin x b) = pure $ Ast.LitBin (x, Ast.TyBin) b
   convert (Ast.LitNil x)   = pure $ Ast.LitNil (x, Ast.TyNil)
+  convert (Ast.LitSym x c) = pure $ Ast.LitSym (x, Ast.TySym) c
   convert (Ast.LitExt x)   = pure $ absurd x
 
 instance Convert Ast.Lit Parse Infer where
@@ -69,6 +70,7 @@ instance Convert Ast.Lit Parse Infer where
   convert (Ast.LitChr x c) = pure $ Ast.LitChr x c
   convert (Ast.LitBin x b) = pure $ Ast.LitBin x b
   convert (Ast.LitNil x)   = pure $ Ast.LitNil x
+  convert (Ast.LitSym x c) = pure $ Ast.LitSym x c
   convert (Ast.LitExt x)   = pure $ absurd x
 
 instance Convert Ast.Pat Parse Infer where

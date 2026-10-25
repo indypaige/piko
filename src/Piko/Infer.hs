@@ -291,7 +291,7 @@ unify sp a b = do
     Ast.Mismatch {} -> throwError $ Ast.Mismatch sp a b
     _               -> throwError e
   where
-    f a b | a == b    = pure mempty
+    f a b | a == b = pure mempty
     f (Ast.TyVar _ v) t = bind sp v t
     f t (Ast.TyVar _ v) = bind sp v t
 
@@ -395,6 +395,7 @@ instance Inferable (Ast.Exp Infer) where
     Ast.ExpLit s l@(Ast.LitStr s' l') -> pure $ Ast.ExpLit (s, Ast.TyStr) (Ast.LitStr (s', Ast.TyStr) l')
     Ast.ExpLit s l@(Ast.LitChr s' l') -> pure $ Ast.ExpLit (s, Ast.TyChr) (Ast.LitChr (s', Ast.TyChr) l')
     Ast.ExpLit s l@(Ast.LitNil s')    -> pure $ Ast.ExpLit (s, Ast.TyNil) (Ast.LitNil (s', Ast.TyNil))
+    Ast.ExpLit s l@(Ast.LitSym s' l')    -> pure $ Ast.ExpLit (s, Ast.TySym) (Ast.LitSym (s', Ast.TySym) l')
     Ast.ExpLit s   (Ast.LitExt void)  -> pure $ absurd void
 
     Ast.ExpExt (s, t)                 -> do
