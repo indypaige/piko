@@ -287,16 +287,17 @@ bind s v t
 unify :: Inference es => Ast.Span -> Ast.Ty -> Ast.Ty -> Eff es Subst
 unify sp a b = do
   compatible a b
-  f a b
+  f a b `catchError` \_ e -> case e of
+    Ast.Mismatch {} -> throwError $ Ast.Mismatch sp a b
+    _               -> throwError e
   where
     f a b | a == b    = pure mempty
     f (Ast.TyVar _ v) t = bind sp v t
     f t (Ast.TyVar _ v) = bind sp v t
 
-    f (Ast.TyApp sp' x y) (Ast.TyApp sp'' x' y') = do
-      let thisspan = sp' <> sp''
-      s  <- unify thisspan x x'
-      s' <- unify thisspan (s .$ y) (s .$ y')
+    f (Ast.TyApp _ x y) (Ast.TyApp _ x' y') = do
+      s  <- unify sp x x'
+      s' <- unify sp (s .$ y) (s .$ y')
 
       pure $ s' <.> s
 

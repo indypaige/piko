@@ -4,7 +4,6 @@ import qualified Data.Text as Text
 import qualified Piko.Ast as Ast
 import Data.Text (Text)
 
-
 prettyTy :: Ast.Ty -> Text
 prettyTy ty =
   case ty of
@@ -12,8 +11,10 @@ prettyTy ty =
 
     Ast.TyCon _ name -> name
 
-    Ast.TyApp _ (Ast.TyApp _ (Ast.TyCon _ "->") lhs) rhs ->
-      prettyArrow lhs rhs
+    Ast.TyApp _
+      (Ast.TyApp _ (Ast.TyCon _ "->") lhs)
+      rhs ->
+        prettyArrow lhs rhs
 
     Ast.TyApp _ f x ->
       prettyApplication f x
@@ -24,14 +25,22 @@ prettyArrow lhs rhs =
   where
     prettyArrowLhs t =
       case t of
-        Ast.TyApp _ (Ast.TyApp _ (Ast.TyCon _ "->") _) _ ->
-          "(" <> prettyTy t <> ")"
+        Ast.TyApp _
+          (Ast.TyApp _ (Ast.TyCon _ "->") _)
+          _ ->
+            "(" <> prettyTy t <> ")"
+
         _ ->
           prettyTy t
 
+
 prettyApplication :: Ast.Ty -> Ast.Ty -> Text
 prettyApplication f x =
-  prettyFunction f <> " " <> prettyArgument x
+  case f of
+    Ast.TyCon _ "->" ->
+      "(->) " <> prettyArgument x
+    _ ->
+      prettyFunction f <> " " <> prettyArgument x
   where
     prettyFunction t =
       case t of
@@ -42,3 +51,4 @@ prettyApplication f x =
       case t of
         Ast.TyApp {} -> "(" <> prettyTy t <> ")"
         _            -> prettyTy t
+
