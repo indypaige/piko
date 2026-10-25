@@ -320,3 +320,20 @@ fn = do
     Just (sig, _)            -> pure $ Ast.Fn s'' (Just sig) n expr 
   where
     name = varid <|> try (parens varsym)
+
+item :: Parser (Ast.Item Parse)
+item = do
+  f@(Ast.Fn _ sig n e) <- fn
+  if n == "main"
+    then do
+      case sig of
+        Nothing -> pure ()
+        Just (_, ty) ->
+          unless (ty == Ast.TyIO Ast.TyNil) $
+            fail "main must have type IO Nil"
+      pure $ Ast.ItemMain e
+    else
+      pure $ Ast.ItemFn f
+
+module' :: Parser (Ast.Module Parse)
+module' = item `sepEndBy` newline

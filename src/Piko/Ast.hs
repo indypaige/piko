@@ -5,6 +5,7 @@ import Effectful.State.Static.Local
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Effectful.Reader.Static
+import Effectful.Error.Static
 import Data.Text (Text)
 import Data.Traversable
 import Data.Map (Map)
@@ -132,7 +133,9 @@ pattern TyDec     = TyCon "Dec"
 pattern TyChr     = TyCon "Chr"
 pattern TyNum     = TyCon "Num"
 pattern TyNil     = TyCon "Nil"
+pattern TySym     = TyCon "Nil"
 
+pattern TyIO a    = TyApp (TyCon "IO") a
 pattern TyLst a   = TyApp (TyCon "Lst") a
 
 instance Plated Ty where
@@ -302,6 +305,8 @@ data InferError
   | Unbound Span Text
   | Infinite Text Ty
   | Mismatch Ty Ty
+  | UndefinedMain
+  | DuplicateMain
   deriving Show
 
 data Fn x = Fn Span (Maybe (Span, Ty)) Text (Exp x)
@@ -311,10 +316,12 @@ mapExp f (Fn s sig n e) = Fn s sig n (f e)
 
 deriving instance Show (Fn Parse)
 deriving instance Show (Fn Typed)
+deriving instance Show (Fn Infer)
 
 builtinInfix :: [(Text, (Int, Int))]
 builtinInfix = concat [ bp ["+", "-", ".+", ".-"] 05 06
                       , bp ["*", "/", ".*", "./"] 07 08
+                      , bp [">>=", ">>"]          14 13
                       , bp ["."]                  10 09
                       ]
   where
@@ -339,6 +346,16 @@ builtinSchemes = Map.fromList [ ("+", f n3)
                               , (".-", f d3)
                               , (".*", f d3)
                               , ("./", f d3)
+                              , ("pure", Set.singleton "a" :&: TyVar "a" :-> TyIO (TyVar "a"))
+                              , (">>=", Set.fromList ["a", "b"] :&: TyIO (TyVar "a") :-> (TyVar "a" :-> TyIO (TyVar "b")) :-> TyIO (TyVar "b"))
+                              , (">>", Set.fromList ["a", "b"] :&: TyIO (TyVar "a") :-> TyIO (TyVar "b") :-> TyIO (TyVar "b"))
+                              , ("putStrLn", f $ TyStr :-> TyIO TyNil)
+                              , ("strFromChr", f $ TyChr :-> TyStr)
+                              , ("strFromNum", f $ TyNum :-> TyStr)
+                              , ("strFromDec", f $ TyNum :-> TyStr)
+                              , ("strFromBin", f $ TyBin :-> TyStr)
+                              , ("strFromSym", f $ TySym :-> TyStr)
+                              , ("strFromNil", f $ TyNil :-> TyStr)
                               ]
   where
     f m = mempty :&: m
@@ -352,3 +369,33 @@ keywords = [ "then"
            , "if"
            , "in"
            ]
+
+data Item x
+  = ItemMain (Exp x)
+  | ItemFn   (Fn x)
+
+
+deriving instance Show (Item Parse)
+deriving instance Show (Item Typed)
+deriving instance Show (Item Infer)
+
+type Module x = [Item x]
+
+isMain :: Item x -> Bool
+isMain (ItemMain _) = True
+isMain (ItemFn   _) = False
+
+splitMain :: Error InferError :> es => Module x -> Eff es (Item x, Module x)
+splitMain mod = case partition isMain mod of
+                  ([], _)    -> throwError UndefinedMain
+                  (x:[], xs) -> pure (x, xs)
+                  _          -> throwError DuplicateMain
+
+refs :: Exp Infer -> Set Text
+refs (ExpLet _ _ x y) = refs x `Set.union` refs y
+refs (ExpExt (_, n))  = Set.singleton n
+refs (ExpApp _ x y)   = refs x `Set.union` refs y
+refs (ExpLst _ xs)    = Set.unions $ refs <$> xs
+refs (ExpTup _ xs)    = Set.unions $ refs <$> xs
+refs (ExpAbs _ _ x)   = refs x
+refs _                = mempty

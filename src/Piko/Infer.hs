@@ -3,8 +3,9 @@ module Piko.Infer where
 import Piko.Ast (X(..), Scheme(..), pattern (:->))
 import qualified Control.Monad.State.Lazy as Lazy
 import qualified Text.Megaparsec as Megaparsec
+import Data.Graph (SCC(..), stronglyConnComp)
 import Control.Lens hiding (Context, (<.>))
-import Piko.Reduce (reduce, reduceFn)
+import Piko.Reduce (reduce, Reduce(..))
 import Effectful.Writer.Static.Local
 import qualified Piko.Parse as Parse
 import Effectful.State.Static.Local
@@ -35,6 +36,9 @@ kinds = Map.fromList
   , ("Dec",    Ast.KindType)
   , ("Bin",    Ast.KindType)
   , ("Nil",    Ast.KindType)
+  , ("Str",    Ast.KindType)
+  , ("Chr",    Ast.KindType)
+  , ("Sym",    Ast.KindType)
   , ("Lst",    Ast.KindArr Ast.KindType Ast.KindType)
   , ("IO",     Ast.KindArr Ast.KindType Ast.KindType)
   , ("->",     Ast.KindArr Ast.KindType (Ast.KindArr Ast.KindType Ast.KindType))
@@ -229,6 +233,13 @@ instance Substitutable a => Substitutable [a] where
 instance Substitutable (Ast.Fn Typed) where
   vars (Ast.Fn _ mt _ expr)  = vars expr `Set.union` maybe mempty (vars . snd) mt 
   s .$ (Ast.Fn sp mt n expr) = Ast.Fn sp (fmap (\(sp', t) -> (sp', s .$ t)) mt) n (s .$ expr)
+
+instance Substitutable (Ast.Item Typed) where
+  vars (Ast.ItemMain expr) = vars expr
+  vars (Ast.ItemFn fn)     = vars fn
+
+  s .$ (Ast.ItemMain expr) = Ast.ItemMain (s .$ expr)
+  s .$ (Ast.ItemFn   fn)   = Ast.ItemFn   (s .$ fn)
 
 instance Substitutable (Ast.Exp Typed) where
   vars = \case
@@ -484,12 +495,110 @@ instance Inferable (Ast.Fn Infer) where
     exprt <- infer expr
     pure $ Ast.Fn s Nothing n exprt
 
+instance Inferable (Ast.Item Infer) where
+  type Resolved (Ast.Item Infer) = Ast.Item Typed
+
+  infer (Ast.ItemMain expr) = do
+    exprt <- infer expr
+
+    Ast.TyIO Ast.TyNil  <=> Ast.tyOf exprt
+
+    pure $ Ast.ItemMain exprt
+
+  infer (Ast.ItemFn fn) = Ast.ItemFn <$> infer fn
+
+instance Inferable (Ast.Module Infer) where
+  type Resolved (Ast.Module Infer) = Ast.Module Typed
+
+  infer x = do
+    (mainItem, fns) <- Ast.splitMain x
+
+    main            <- case mainItem of
+                         Ast.ItemMain expr -> pure expr
+
+    let groups = stronglyConnComp
+          [ (fn, name, Set.toList (Ast.refs expr))
+          | Ast.ItemFn fn@(Ast.Fn _ _ name expr) <- fns
+          ]
+
+    xs <- concat <$> mapM f groups
+
+    let resolved = Map.fromList
+          [ (name, fn)
+          | fn@(Ast.Fn _ _ name _) <- xs
+          ]
+
+    main' <- infer main
+    Ast.tyOf main' <=> Ast.TyIO Ast.TyNil
+
+    fns' <- mapM (\item -> case item of
+                     Ast.ItemFn (Ast.Fn sp _ name _) ->
+                       case Map.lookup name resolved of
+                         Just fn -> pure (Ast.ItemFn fn)
+                         Nothing -> throwError $ Ast.Unbound sp name
+                     Ast.ItemMain _ -> throwError Ast.UndefinedMain)
+            fns
+    pure (Ast.ItemMain main' : fns')
+      where
+        f group = do
+          let xs = case group of
+                     AcyclicSCC x -> [x]
+                     CyclicSCC xs -> xs
+
+          tys <- mapM (\(Ast.Fn _ _ name _) -> (name,) <$> freshTy) xs
+
+          ctx    <- ask @Context
+          locals <- get @Scope
+
+          let inner = Map.fromList
+                [ (name, mempty :&: t)
+                | (name, t) <- tys
+                ]
+
+          put @Scope (inner `Map.union` locals)
+
+          (ys, cs) <- listen $
+            mapM (\(Ast.Fn sp sig name expr) -> do
+                     expr' <- infer expr
+                     let et = Ast.tyOf expr'
+
+                     case Map.lookup name inner of
+                       Just (_ :&: t) -> t <=> et
+                       Nothing        -> throwError $ Ast.Unbound sp name
+
+                     pure $ Ast.Fn sp sig name expr')
+            xs
+
+          subst <- solve cs
+
+          let ctx'    = subst .$ ctx
+              locals' = Map.map (subst .$) locals
+              schemes = Map.fromList
+                        [ (name, generalize (ctx' ++ Map.elems locals') (subst .$ t))
+                        | (name, t) <- tys
+                        ]
+
+          put @Scope (schemes `Map.union` locals')
+
+          pure $ subst .$ ys
+
 instance Convert Ast.Fn Infer Typed where
   type Es Ast.Fn Infer Typed = '[Error Ast.InferError]
 
   convert fn = do
     fn' <- ty fn
-    pure (reduceFn fn')
+    pure (reduce fn')
+
+instance Convert Ast.Item Infer Typed where
+  type Es Ast.Item Infer Typed = '[Error Ast.InferError]
+
+  convert item = do
+    item' <- ty item
+    pure (reduce item')
+
+  convertMany items = do
+    items <- ty items
+    pure (reduce <$> items)
 
 instance Convert Ast.Exp Infer Typed where
   type Es Ast.Exp Infer Typed = '[Error Ast.InferError]
@@ -499,11 +608,10 @@ instance Convert Ast.Exp Infer Typed where
     pure (reduce expr')
 
 test :: Text -> IO ()
-test t = case Lazy.evalState (Megaparsec.runParserT (Parse.fn <* Megaparsec.eof) "test.piko" t) Parse.emptyCtx of
-           Left  x -> putStr (Megaparsec.errorBundlePretty x)
-           Right y -> let x = convert @Ast.Fn @Parse @Typed y
+test t = case Lazy.evalState (Megaparsec.runParserT (Parse.module' <* Megaparsec.eof) "test.piko" t) Parse.emptyCtx of
+           Left  x -> putStr (Megaparsec.errorBundlePretty x) 
+           Right y -> let x = convertMany @_ @Parse @Typed y
                             & runPureEff
                             . runErrorNoCallStack
                             . runReader []
                       in pPrint x
-

@@ -105,6 +105,12 @@ instance Convert Ast.Fn Parse Infer where
 
   convert (Ast.Fn s sig n expr) = Ast.Fn s sig n <$> convert expr
 
+instance Convert Ast.Item Parse Infer where
+  type Es Ast.Item Parse Infer = Es Ast.Exp Parse Infer
+
+  convert (Ast.ItemMain ex) = Ast.ItemMain <$> convert ex
+  convert (Ast.ItemFn   fn) = Ast.ItemFn   <$> convert fn
+
 instance Convert Ast.Exp Parse Infer where
   type Es Ast.Exp Parse Infer = '[Reader [(Text, Int)]]
 

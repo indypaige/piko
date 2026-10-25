@@ -70,25 +70,32 @@ beta p x y = shift (-l) 0 $ subst 0 (shift l 0 x) y
   where
     l = Ast.arity p
 
-reduce :: Ast.Exp Typed -> Ast.Exp Typed
-reduce (Ast.ExpLet _ p x y) = reduce $ beta p (reduce x) y
+class Reduce a where
+  reduce :: a Ast.Typed -> a Ast.Typed
 
-reduce (Ast.ExpApp a f x)   = case (reduce f, reduce x) of
+instance Reduce Ast.Exp where
+  reduce (Ast.ExpLet _ p x y) = reduce $ beta p (reduce x) y
+
+  reduce (Ast.ExpApp a f x)   = case (reduce f, reduce x) of
                                 (Ast.ExpAbs _ p f', x') -> reduce (beta p x' f')
                                 (f', x')               -> Ast.ExpApp a f' x'
 
-reduce (Ast.ExpCnd s x y z) = case reduce x of
+  reduce (Ast.ExpCnd s x y z) = case reduce x of
                                 (Ast.ExpLit _ (Ast.LitBin _ True))  -> reduce y
                                 (Ast.ExpLit _ (Ast.LitBin _ False)) -> reduce z
                                 _                                   -> Ast.ExpCnd s (reduce x) (reduce y) (reduce z)
 
-reduce (Ast.ExpAbs a p x)   = Ast.ExpAbs a p $ reduce x
+  reduce (Ast.ExpAbs a p x)   = Ast.ExpAbs a p $ reduce x
 
-reduce (Ast.ExpTup a items) = Ast.ExpTup a $ reduce <$> items
+  reduce (Ast.ExpTup a items) = Ast.ExpTup a $ reduce <$> items
 
-reduce (Ast.ExpLst a items) = Ast.ExpLst a $ reduce <$> items
+  reduce (Ast.ExpLst a items) = Ast.ExpLst a $ reduce <$> items
 
-reduce x                    = x
+  reduce x                    = x
 
-reduceFn :: Ast.Fn Typed -> Ast.Fn Typed
-reduceFn = Ast.mapExp reduce
+instance Reduce Ast.Fn where
+  reduce = Ast.mapExp reduce
+
+instance Reduce Ast.Item where
+  reduce (Ast.ItemMain ex) = Ast.ItemMain (reduce ex)
+  reduce (Ast.ItemFn   fn) = Ast.ItemFn (reduce fn)
