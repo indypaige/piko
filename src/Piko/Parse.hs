@@ -277,23 +277,33 @@ ty = arr
   where
     arr = do
       a <- app
-      f a <|> pure a
-        where
-          f a = do
-            hspace
-            "->"
-            hspace
-            b <- arr
-            pure (a Ast.:-> b)
+      (do
+          hspace
+          (s, _) <- spanned "->"
+          hspace
+          b <- arr
+          let whole = Ast.spanOfTy a <> Ast.spanOfTy b
+              arrow = Ast.TyCon s "->"
+              partial = Ast.TyApp whole arrow a
+          pure $ Ast.TyApp whole partial b
+        ) <|> pure a
 
     app = do
-      xs <- atm `sepBy1` hspace1
-      pure $ foldl1 Ast.TyApp xs
+      a <- atm
+      rest <- many $ try $ do
+        hspace1
+        b <- atm
+        pure b
+      pure $ foldl applyTy a rest
 
-    atm = msum [ Ast.TyCon <$> conid
-               , Ast.TyVar <$> varid
-               , parens ty
-               ]
+    applyTy f x =
+      Ast.TyApp (Ast.spanOfTy f <> Ast.spanOfTy x) f x
+
+    atm = msum
+      [ spanned (conid) >>= \(s, n) -> pure (Ast.TyCon s n)
+      , spanned varid >>= \(s, n) -> pure (Ast.TyVar s n)
+      , parens ty
+      ]
 
 fn :: Parser (Ast.Fn Parse)
 fn = do

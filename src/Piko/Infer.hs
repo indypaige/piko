@@ -6,14 +6,15 @@ import qualified Text.Megaparsec as Megaparsec
 import Data.Graph (SCC(..), stronglyConnComp)
 import Control.Lens hiding (Context, (<.>))
 import Piko.Reduce (reduce, Reduce(..))
+import Data.Text (Text, pack, unpack)
 import Effectful.Writer.Static.Local
 import qualified Piko.Parse as Parse
 import Effectful.State.Static.Local
+import qualified Data.Text as Text
 import qualified Piko.Ast as Ast
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Effectful.Reader.Static
-import Data.Text (Text, pack)
 import Effectful.Error.Static
 import Text.Show.Pretty
 import Data.Map (Map)
@@ -21,6 +22,7 @@ import Data.Set (Set)
 import Control.Monad
 import Piko.Convert
 import Piko.Counter
+import Piko.Diag
 import Effectful
 import Data.Void
 
@@ -107,15 +109,15 @@ inferKind :: ( Error Ast.InferError :> es
              ) => Ast.Ty -> Eff es Ast.Kind
 
 inferKind = \case
-  Ast.TyCon n -> gets (Map.lookup n . tcons) >>= \case
+  Ast.TyCon s n -> gets (Map.lookup n . tcons) >>= \case
     Just k  -> pure k
-    Nothing -> throwError $ Ast.UnknownTypeConstructor n
+    Nothing -> throwError $ Ast.UnknownTypeConstructor s n
 
   Ast.TyTup ts -> do
     mapM_ check ts
     pure Ast.KindType
 
-  Ast.TyVar v -> do
+  Ast.TyVar _ v -> do
     x <- get @Local
 
     case Map.lookup v (types x) of
@@ -128,7 +130,7 @@ inferKind = \case
 
         pure k
 
-  Ast.TyApp f x -> do
+  Ast.TyApp _ f x -> do
     fk <- inferKind f
     xk <- inferKind x
     rk <- freshKind
@@ -156,7 +158,7 @@ compatible x y = do
 
   unifyKind xk yk
 
-data Constraint  = Constraint Ast.Ty Ast.Ty
+data Constraint  = Constraint Ast.Span Ast.Ty Ast.Ty
 type Constraints = [Constraint]
 
 type Context     = [Ast.Scheme]
@@ -177,17 +179,25 @@ type Inference es
     , Counter :> es
     )
 
-infixr 8 <=>
-
-(<=>) :: Inference es => Ast.Ty -> Ast.Ty -> Eff es ()
-(<=>) x y = do
+constrain :: Inference es => Ast.Span -> Ast.Ty -> Ast.Ty -> Eff es ()
+constrain s x y = do
   check x
   check y
 
-  tell (Constraint x y:[])
+  tell [Constraint s x y]
+
+alphabetize :: Int -> Text
+alphabetize n
+  | n < 0     = "t" <> Text.pack (show n)
+  | otherwise = Text.singleton letter <> suffix
+  where
+    letter = toEnum (fromEnum 'a' + n `mod` 26)
+    suffix
+      | n < 26    = ""
+      | otherwise = Text.pack (show (n `div` 26))
 
 freshTy :: Inference es => Eff es Ast.Ty
-freshTy = Ast.TyVar . pack . show <$> freshInt
+freshTy = Ast.TyVar mempty . alphabetize <$> freshInt
 
 (<.>) :: Subst -> Subst -> Subst
 (<.>) a b = (a .$) <$> (b `Map.union` a)
@@ -197,12 +207,12 @@ class Substitutable a where
   (.$) :: Subst -> a -> a
 
 instance Substitutable Ast.Ty where
-  vars (Ast.TyVar t)   = Set.singleton t
-  vars (Ast.TyCon _)   = mempty
-  vars (Ast.TyApp x y) = vars x `Set.union` vars y
+  vars (Ast.TyVar _ t)   = Set.singleton t
+  vars (Ast.TyCon _ _)   = mempty
+  vars (Ast.TyApp _ x y) = vars x `Set.union` vars y
 
-  s .$ t@(Ast.TyVar t') = Map.findWithDefault t t' s
-  s .$ x                = x & plate %~ (s .$)
+  s .$ t@(Ast.TyVar _ t') = Map.findWithDefault t t' s
+  s .$ x                  = x & plate %~ (s .$)
 
 instance Substitutable Ast.Scheme where
   vars (v :&: t) = vars t `Set.difference` v
@@ -223,8 +233,8 @@ generalize :: Context -> Ast.Ty -> Ast.Scheme
 generalize ctx t = vars t `Set.difference` vars ctx :&: t
 
 instance Substitutable Constraint where
-  vars (Constraint t t') = vars t `Set.union` vars t'
-  s .$ (Constraint t t') = Constraint (s .$ t) (s .$ t')
+  vars (Constraint s t t') = vars t `Set.union` vars t'
+  s .$ (Constraint p t t') = Constraint p (s .$ t) (s .$ t')
 
 instance Substitutable a => Substitutable [a] where
   vars   = foldr (Set.union . vars) mempty
@@ -245,7 +255,7 @@ instance Substitutable (Ast.Exp Typed) where
   vars = \case
     Ast.ExpApp (_, t) f a    -> vars t `Set.union` vars f `Set.union` vars a
     Ast.ExpLet (_, t) p x y  -> vars t `Set.union` vars x `Set.union` vars y
-    Ast.ExpAbs (_, t) p body -> vars t `Set.union` vars t
+    Ast.ExpAbs (_, t) p body -> vars t `Set.union` vars body
     Ast.ExpLit (_, t) _      -> vars t
     Ast.ExpVar (_, t)        -> vars t
     Ast.ExpExt (_, t)        -> vars t
@@ -260,33 +270,33 @@ instance Substitutable (Ast.Exp Typed) where
     Ast.ExpLit (c, t) lit    -> Ast.ExpLit (c, s .$ t) lit
     Ast.ExpVar (c, t)        -> Ast.ExpVar (c, s .$ t)
     Ast.ExpExt (c, t)        -> Ast.ExpExt (c, s .$ t)
-    Ast.ExpLst (c, t) a      -> Ast.ExpLst (c, s .$ t) a
-    Ast.ExpTup (c, t) b      -> Ast.ExpTup (c, s .$ t) b
-    Ast.ExpCnd (c, t) x y z  -> Ast.ExpCnd (c, s .$ t) x y z
+    Ast.ExpLst (c, t) a      -> Ast.ExpLst (c, s .$ t) ((s .$) <$> a)
+    Ast.ExpTup (c, t) b      -> Ast.ExpTup (c, s .$ t) ((s .$) <$> b)
+    Ast.ExpCnd (c, t) x y z  -> Ast.ExpCnd (c, s .$ t) (s .$ x) (s .$ y) (s .$ z)
 
 class Inferable a where
   type Resolved a
 
   infer :: Inference es => a -> Eff es (Resolved a)
 
-bind :: Inference es => Text -> Ast.Ty -> Eff es Subst
-bind v t
-  | v `Set.member` vars t = throwError $ Ast.Infinite v t
+bind :: Inference es => Ast.Span -> Text -> Ast.Ty -> Eff es Subst
+bind s v t
+  | v `Set.member` vars t = throwError $ Ast.Infinite s v t
   | otherwise             = pure $ Map.singleton v t
 
-unify :: Inference es => Ast.Ty -> Ast.Ty -> Eff es Subst
-unify a b = do
+unify :: Inference es => Ast.Span -> Ast.Ty -> Ast.Ty -> Eff es Subst
+unify sp a b = do
   compatible a b
-
   f a b
   where
     f a b | a == b    = pure mempty
-    f (Ast.TyVar v) t = bind v t
-    f t (Ast.TyVar v) = bind v t
+    f (Ast.TyVar _ v) t = bind sp v t
+    f t (Ast.TyVar _ v) = bind sp v t
 
-    f (Ast.TyApp x y) (Ast.TyApp x' y') = do
-      s  <- unify x x'
-      s' <- unify (s .$ y) (s .$ y')
+    f (Ast.TyApp sp' x y) (Ast.TyApp sp'' x' y') = do
+      let thisspan = sp' <> sp''
+      s  <- unify thisspan x x'
+      s' <- unify thisspan (s .$ y) (s .$ y')
 
       pure $ s' <.> s
 
@@ -295,19 +305,19 @@ unify a b = do
       | length xs == length ys = do
           foldM
             (\s (x, y) -> do
-                s' <- unify (s .$ x) (s .$ y)
+                s' <- unify sp (s .$ x) (s .$ y)
                 pure (s' <.> s))
             mempty
             (zip xs ys)
 
-    f a b = throwError $ Ast.Mismatch a b
+    f a b = throwError $ Ast.Mismatch sp a b
 
 solve :: Inference es => [Constraint] -> Eff es Subst
 solve = f mempty
   where
-    f s []                     = pure s
-    f s ((Constraint t t'):cs) = do
-      s' <- unify t t'
+    f s []                        = pure s
+    f s ((Constraint sp t t'):cs) = do
+      s' <- unify sp t t'
       f (s' <.> s) (s' .$ cs)
 
 ty :: ( Substitutable (Resolved a)
@@ -359,13 +369,13 @@ instance Inferable (Ast.Pat Infer) where
 
       pure (t, bindings)
 
-    Ast.PatLst _ ps -> do
+    Ast.PatLst s ps -> do
       eTy <- freshTy
       i <- traverse infer ps
 
-      mapM_ (\(t, _) -> t <=> eTy) i
+      mapM_ (\(t, _) -> constrain s t eTy) i
 
-      pure ( Ast.TyApp (Ast.TyCon "Lst") eTy
+      pure ( Ast.TyApp mempty (Ast.TyCon mempty "Lst") eTy
            , concatMap snd i
            )
 
@@ -406,9 +416,9 @@ instance Inferable (Ast.Exp Infer) where
       yt <- infer y
       zt <- infer z
 
-      Ast.tyOf xt <=> Ast.TyBin
+      constrain (Ast.spanOf xt) (Ast.tyOf xt) Ast.TyBin
 
-      Ast.tyOf yt <=> Ast.tyOf zt
+      constrain s (Ast.tyOf yt) (Ast.tyOf zt)
 
       pure $ Ast.ExpCnd (s, Ast.tyOf yt) xt yt zt
 
@@ -442,7 +452,7 @@ instance Inferable (Ast.Exp Infer) where
 
       rt <- freshTy
 
-      ft <=> at :-> rt
+      constrain s ft (at :-> rt)
 
       pure $ Ast.ExpApp (s, rt) f' a'
 
@@ -458,7 +468,7 @@ instance Inferable (Ast.Exp Infer) where
       xs' <- traverse infer xs
       t   <- freshTy
 
-      traverse (\x -> Ast.tyOf x <=> t) xs'
+      traverse (\x -> constrain (Ast.spanOf x) (Ast.tyOf x) t) xs'
 
       pure $ Ast.ExpLst (s, Ast.TyLst t) xs'
 
@@ -487,7 +497,7 @@ instance Inferable (Ast.Fn Infer) where
   infer (Ast.Fn s (Just (s', t)) n expr) = do
     exprt <- infer expr
 
-    t <=> Ast.tyOf exprt
+    constrain s' t (Ast.tyOf exprt)
 
     pure $ Ast.Fn s (Just (s', t)) n exprt
 
@@ -501,7 +511,7 @@ instance Inferable (Ast.Item Infer) where
   infer (Ast.ItemMain expr) = do
     exprt <- infer expr
 
-    Ast.TyIO Ast.TyNil  <=> Ast.tyOf exprt
+    constrain (Ast.spanOf exprt) (Ast.TyIO Ast.TyNil) (Ast.tyOf exprt)
 
     pure $ Ast.ItemMain exprt
 
@@ -529,7 +539,7 @@ instance Inferable (Ast.Module Infer) where
           ]
 
     main' <- infer main
-    Ast.tyOf main' <=> Ast.TyIO Ast.TyNil
+    constrain (Ast.spanOf main') (Ast.tyOf main') (Ast.TyIO Ast.TyNil)
 
     fns' <- mapM (\item -> case item of
                      Ast.ItemFn (Ast.Fn sp _ name _) ->
@@ -563,7 +573,7 @@ instance Inferable (Ast.Module Infer) where
                      let et = Ast.tyOf expr'
 
                      case Map.lookup name inner of
-                       Just (_ :&: t) -> t <=> et
+                       Just (_ :&: t) -> constrain sp t et
                        Nothing        -> throwError $ Ast.Unbound sp name
 
                      pure $ Ast.Fn sp sig name expr')
@@ -614,4 +624,6 @@ test t = case Lazy.evalState (Megaparsec.runParserT (Parse.module' <* Megaparsec
                             & runPureEff
                             . runErrorNoCallStack
                             . runReader []
-                      in pPrint x
+                      in case x of
+                           Left e  -> putStrLn $ unpack $ (diag e t)
+                           Right y -> pPrint y

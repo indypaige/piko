@@ -106,41 +106,61 @@ data Exp (x :: X)
   | ExpExt (XExpExt x)
 
 data Ty
-  = TyApp Ty Ty
-  | TyCon Text
-  | TyVar Text
+  = TyApp Span Ty Ty
+  | TyCon Span Text
+  | TyVar Span Text
   deriving ( Show
            , Ord
-           , Eq
            )
 
+instance Eq Ty where
+  TyVar _ a == TyVar _ b = a == b
+  TyCon _ a == TyCon _ b = a == b
+  TyApp _ f x == TyApp _ f' x' = f == f' && x == x'
+  _ == _ = False
+
+spanOfTy :: Ty -> Span
+spanOfTy (TyApp s _ _) = s
+spanOfTy (TyCon s _)   = s
+spanOfTy (TyVar s _)   = s
+
 infixr 9 :->
-pattern (:->) a b = TyApp (TyApp (TyCon "->") a) b
+
+pattern (:->) :: Ty -> Ty -> Ty
+pattern a :-> b <- TyApp _ (TyApp _ (TyCon _ "->") a) b
+  where
+    a :-> b = TyApp mempty (TyApp mempty (TyCon mempty "->") a) b
 
 pattern TyTup ts <- (tupleArgs -> Just ts)
   where
-    TyTup ts = foldl TyApp (TyCon "Tup") ts
+    TyTup ts = foldl (TyApp mempty) (TyCon mempty "Tup") ts
 
-tupleArgs = f []
+tupleArgs :: Ty -> Maybe [Ty]
+tupleArgs = go []
   where
-    f args (TyApp f' x)   = f (x : args) f'
-    f args (TyCon "Tup") = Just args
-    f _    _             = Nothing
+    go args (TyApp _ f x)  = go (x : args) f
+    go args (TyCon _ "Tup") = Just args
+    go _ _                  = Nothing
 
-pattern TyBin     = TyCon "Bin"
-pattern TyStr     = TyCon "Str"
-pattern TyDec     = TyCon "Dec"
-pattern TyChr     = TyCon "Chr"
-pattern TyNum     = TyCon "Num"
-pattern TyNil     = TyCon "Nil"
-pattern TySym     = TyCon "Nil"
+pattern TyBin <- TyCon _ "Bin" where TyBin = TyCon mempty "Bin"
+pattern TyStr <- TyCon _ "Str" where TyStr = TyCon mempty "Str"
+pattern TyDec <- TyCon _ "Dec" where TyDec = TyCon mempty "Dec"
+pattern TyChr <- TyCon _ "Chr" where TyChr = TyCon mempty "Chr"
+pattern TyNum <- TyCon _ "Num" where TyNum = TyCon mempty "Num"
+pattern TyNil <- TyCon _ "Nil" where TyNil = TyCon mempty "Nil"
+pattern TySym <- TyCon _ "Sym" where TySym = TyCon mempty "Sym"
 
-pattern TyIO a    = TyApp (TyCon "IO") a
-pattern TyLst a   = TyApp (TyCon "Lst") a
+pattern TyIO a <- TyApp _ (TyCon _ "IO") a
+  where
+    TyIO a = TyApp mempty (TyCon mempty "IO") a
+
+pattern TyLst a <- TyApp _ (TyCon _ "Lst") a
+  where
+    TyLst a = TyApp mempty (TyCon mempty "Lst") a
 
 instance Plated Ty where
-  plate f (TyApp x y) = TyApp <$> f x <*> f y
-  plate _ x           = pure x
+  plate f (TyApp s x y) = TyApp s <$> f x <*> f y
+  plate _ x             = pure x
 
 type instance XExpVar Infer = (Span, Text, (Int, Int))
 
@@ -282,6 +302,17 @@ instance SpanOf (Exp Parse) where
   spanOf (ExpTup s _)     = s
   spanOf (ExpExt s)       = absurd s
 
+instance SpanOf (Exp Typed) where
+  spanOf (ExpVar ((s, _, _), _)) = s
+  spanOf (ExpApp (s, _) _ _)     = s
+  spanOf (ExpAbs (s, _) _ _)     = s
+  spanOf (ExpLet (s, _) _ _ _)   = s
+  spanOf (ExpLit (s, _) _)       = s
+  spanOf (ExpLst (s, _) _)       = s
+  spanOf (ExpTup (s, _) _)       = s
+  spanOf (ExpCnd (s, _) _ _ _)   = s
+  spanOf (ExpExt ((s, _), _))    = s
+
 class TyOf a where
   tyOf :: a -> Ty
 
@@ -298,18 +329,21 @@ instance TyOf (Exp Typed) where
     ExpTup (_, t) _     -> t
 
 data InferError
-  = UnknownTypeConstructor Text
+  = UnknownTypeConstructor Span Text
   | KindMismatch Kind Kind
   | InfiniteKind Text Kind
+  | Infinite Span Text Ty
   | Undefined Span Text
+  | Mismatch Span Ty Ty
   | Unbound Span Text
-  | Infinite Text Ty
-  | Mismatch Ty Ty
   | UndefinedMain
   | DuplicateMain
   deriving Show
 
 data Fn x = Fn Span (Maybe (Span, Ty)) Text (Exp x)
+
+instance SpanOf (Fn x) where
+  spanOf (Fn s _ _ _) = s
 
 mapExp :: (Exp x -> Exp y) -> Fn x -> Fn y
 mapExp f (Fn s sig n e) = Fn s sig n (f e)
@@ -338,29 +372,53 @@ builtinPostfix = concat [ ]
     bp xs p = (, (p, ())) <$> xs
 
 builtinSchemes :: Map Text Scheme
-builtinSchemes = Map.fromList [ ("+", f n3)
-                              , ("-", f n3)
-                              , ("*", f n3)
-                              , ("/", f n3)
-                              , (".+", f d3)
-                              , (".-", f d3)
-                              , (".*", f d3)
-                              , ("./", f d3)
-                              , ("pure", Set.singleton "a" :&: TyVar "a" :-> TyIO (TyVar "a"))
-                              , (">>=", Set.fromList ["a", "b"] :&: TyIO (TyVar "a") :-> (TyVar "a" :-> TyIO (TyVar "b")) :-> TyIO (TyVar "b"))
-                              , (">>", Set.fromList ["a", "b"] :&: TyIO (TyVar "a") :-> TyIO (TyVar "b") :-> TyIO (TyVar "b"))
-                              , ("putStrLn", f $ TyStr :-> TyIO TyNil)
-                              , ("strFromChr", f $ TyChr :-> TyStr)
-                              , ("strFromNum", f $ TyNum :-> TyStr)
-                              , ("strFromDec", f $ TyNum :-> TyStr)
-                              , ("strFromBin", f $ TyBin :-> TyStr)
-                              , ("strFromSym", f $ TySym :-> TyStr)
-                              , ("strFromNil", f $ TyNil :-> TyStr)
-                              ]
+builtinSchemes = Map.fromList
+  [ ("+", f n3)
+  , ("-", f n3)
+  , ("*", f n3)
+  , ("/", f n3)
+  , (".+", f d3)
+  , (".-", f d3)
+  , (".*", f d3)
+  , ("./", f d3)
+  , ("pure", Set.singleton "a" :&: arrow a (io a))
+  , (">>=", Set.fromList ["a", "b"] :&:
+       arrow (io a) (arrow (arrow a (io b)) (io b)))
+  , (">>", Set.fromList ["a", "b"] :&:
+       arrow (io a) (arrow (io b) (io b)))
+  , ("putStrLn", f $ arrow str (io nil))
+  , ("strFromChr", f $ arrow chr str)
+  , ("strFromNum", f $ arrow num str)
+  , ("strFromDec", f $ arrow dec str)
+  , ("strFromBin", f $ arrow bin str)
+  , ("strFromSym", f $ arrow sym str)
+  , ("strFromNil", f $ arrow nil str)
+  ]
   where
+    s = mempty
+
+    con = TyCon s
+    var = TyVar s
+    app = TyApp s
+
+    arrow x y = app (app (con "->") x) y
+    io x = app (con "IO") x
+
+    a = var "a"
+    b = var "b"
+
+    num = con "Num"
+    dec = con "Dec"
+    bin = con "Bin"
+    chr = con "Chr"
+    str = con "Str"
+    nil = con "Nil"
+    sym = con "Sym"
+
+    n3 = arrow num (arrow num num)
+    d3 = arrow dec (arrow dec dec)
+
     f m = mempty :&: m
-    n3  = TyNum :-> TyNum :-> TyNum
-    d3  = TyDec :-> TyDec :-> TyDec
 
 keywords :: [Text]
 keywords = [ "then"
@@ -373,7 +431,6 @@ keywords = [ "then"
 data Item x
   = ItemMain (Exp x)
   | ItemFn   (Fn x)
-
 
 deriving instance Show (Item Parse)
 deriving instance Show (Item Typed)

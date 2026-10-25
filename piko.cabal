@@ -13,8 +13,10 @@ library
       Piko.Ast
       Piko.Convert
       Piko.Counter
+      Piko.Diag
       Piko.Infer
       Piko.Parse
+      Piko.Pretty
       Piko.Reduce
   hs-source-dirs:
       src
@@ -55,6 +57,7 @@ library
     , effectful-core
     , effectful-th
     , lens
+    , llvm-tf
     , megaparsec
     , mtl
     , pretty-show
